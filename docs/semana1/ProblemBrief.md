@@ -31,17 +31,14 @@ Cada integrante presentó su propuesta individual y el equipo las comparó contr
 Los equipos de rescate en América Latina pierden la comunicación y la trazabilidad de lo que reportan justo en las primeras horas tras un desastre natural, cuando más la necesitan.
 
 ### Equipo y roles
-<!-- COMPLETAR: roles y usuarios de GitHub por confirmar con el equipo. -->
-
 | Integrante | GitHub | Rol |
 |---|---|---|
-| Emanuel Guzman | `Emanuel250YT` | Autor del problema — _[rol por confirmar]_ |
-| Franco Mamani | _[por confirmar]_ | _[rol por confirmar]_ |
-| Emanuel Conte | _[por confirmar]_ | _[rol por confirmar]_ |
-| Aldo Duran | _[por confirmar]_ | _[rol por confirmar]_ |
-| _[por confirmar]_ | `migux97` | Mantenedor del repositorio — _[rol por confirmar]_ |
+| Franco Alejandro Mamani | `migux97` | Project Lead |
+| Emanuel Guzman | `Emanuel250YT` | Full Stack Developer (autor del problema) |
+| Emanuel Conte | _[por confirmar]_ | Market |
+| Aldo Duran | _[por confirmar]_ | _Por definir_ |
 
-- **Responsable de las entregas:** _[por confirmar]_
+- **Responsable de las entregas:** Franco Alejandro Mamani (Project Lead)
 - **Canal de coordinación interna:** _[por confirmar]_
 
 ### Problema y evidencia
@@ -50,13 +47,10 @@ Los equipos de rescate en América Latina pierden la comunicación y la trazabil
 **Contexto y alcance:** buena parte de América Latina está sobre el Cinturón de Fuego del Pacífico y además enfrenta huracanes, inundaciones y deslaves. Fuera de las grandes ciudades, las antenas celulares suelen carecer de respaldo de energía prolongado y de enlaces redundantes, y la red se satura en cuanto toda la población intenta comunicarse a la vez. No es un evento excepcional: la región sufre cada año varios desastres de magnitud nacional.
 
 **Evidencia:**
-- **Sismo del 19 de septiembre de 2017 (México):** la saturación y caída parcial de la red celular en Ciudad de México, Morelos y Puebla obligó a coordinar búsquedas mediante redes sociales, radios y hojas en papel; buena parte del mapeo de edificios colapsados lo hicieron voluntarios con herramientas improvisadas.
-- **Huracán María (Puerto Rico, 2017):** según los reportes de estado de la FCC, más del 90 % de los sitios celulares de la isla quedaron fuera de servicio en los días posteriores.
-- **Huracán Otis (Acapulco, octubre de 2023):** la ciudad quedó prácticamente incomunicada durante horas, sin telefonía ni internet, retrasando la dimensión real del daño.
-- **Sismo y tsunami de Chile (2010):** la caída de comunicaciones afectó la coordinación entre organismos y la emisión de alertas.
-- Los protocolos de búsqueda y rescate urbano (INSARAG) consideran críticas las primeras 72 horas para encontrar sobrevivientes con vida.
-
-_Fuentes a enlazar en la versión final: reportes de estado de la FCC (Hurricane Maria), crónicas del 19S y de Otis, guías INSARAG._
+- **Terremoto de Colombia (10 de agosto de 2026, M7,4, San José del Palmar, Chocó):** según MinTIC, **3.403 de 7.379 estaciones base (46,1 %)** quedaron fuera de servicio en siete departamentos; en Risaralda, el 77 %. Claro y Tigo lo atribuyeron a cortes de energía, daños en la infraestructura y sobrecarga de tráfico. El Gobierno declaró desastre nacional con más de 100 fallecidos. ([El País](https://www.elpais.com.co/colombia/terremoto-en-colombia-casi-la-mitad-de-las-antenas-moviles-estan-fuera-de-servicio-estos-son-los-departamentos-mas-afectados-1143.html), [Infobae](https://www.infobae.com/tecno/2026/08/10/colombia-tiene-fallas-en-telecomunicaciones-tras-el-terremoto-claro-y-tigo-con-telefonia-e-internet/), [Chequeado](https://chequeado.com/el-explicador/terremoto-de-magnitud-7-4-en-colombia-el-gobierno-declara-desastre-nacional-y-reporta-al-menos-111-muertos/))
+- **Lluvias de octubre de 2025 (Hidalgo, Veracruz, Puebla):** más de 20 días después seguían **112 localidades incomunicadas**; 10 en Hidalgo sin acceso terrestre ni aéreo. ([El Universal](https://www.eluniversal.com.mx/nacion/sin-comunicacion-112-comunidades-de-veracruz-hidalgo-y-puebla-10-zonas-hidalguenses-no-tienen-acceso-terrestre-o-aereo-pc/))
+- **Huracán Melissa (Jamaica, octubre de 2025):** las cinco parroquias más golpeadas perdieron toda comunicación. ([Wikipedia](https://en.wikipedia.org/wiki/Hurricane_Melissa))
+- **Inundaciones de Rio Grande do Sul (Brasil, mayo de 2024):** hasta 87 ciudades sin telefonía ni internet; la alcaldía de Bento Gonçalves reportó que esto dificultaba el contacto entre Defensa Civil y SAMU. ([Agência Brasil](https://agenciabrasil.ebc.com.br/geral/noticia/2024-05/chuvas-afetam-telecomunicacoes-dificultando-resgates-no-rs))
 
 ### Usuario y actores
 **Usuario principal:** los equipos de rescate en campo —bomberos, protección civil, brigadas voluntarias, grupos de búsqueda y rescate urbano— que necesitan reportar y consultar en tiempo casi real qué zonas se revisaron, dónde hay víctimas, qué rutas están bloqueadas y qué recursos faltan.
