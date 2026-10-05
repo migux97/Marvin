@@ -105,11 +105,9 @@ El lienzo cubre problema, segmento de usuarios, propuesta de valor única, soluc
 
 ## 6. Backlog priorizado (Kanban)
 
-**Enlace al tablero (obligatorio):** [Tablero Kanban en GitHub Projects](https://github.com/migux97/Marvin/issues?q=is%3Aissue+label%3Ahistoria)
+**Enlace al tablero (obligatorio):** [Marvin — Backlog en GitHub Projects](https://github.com/users/migux97/projects/1)
 
-<!-- PENDIENTE: reemplazar el enlace por el del tablero de GitHub Projects (https://github.com/users/migux97/projects/N) cuando esté creado. -->
-
-Cada historia del backlog es un issue del repositorio (H1 a H13) con su prioridad como etiqueta (`imprescindible`, `debería`, `podría`) y sus criterios de aceptación como lista de verificación. El tablero tiene las columnas **Backlog**, **Por hacer**, **En progreso**, **En revisión** y **Hecho**, con las historias ordenadas por prioridad dentro del Backlog.
+Cada historia del backlog es un issue del repositorio (H1 a H13) con su prioridad como etiqueta (`imprescindible`, `debería`, `podría`) y sus criterios de aceptación como lista de verificación. El tablero tiene las columnas **Todo**, **In Progress** y **Done**, con las historias ordenadas por prioridad (H1 a H13) dentro de Todo.
 
 ---
 
