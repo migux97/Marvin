@@ -1,0 +1,5264 @@
+From 4d361e668833581d8d98660882e14e18e9859ed9 Mon Sep 17 00:00:00 2001
+From: migux97 <migux97@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 02:19:34 +0000
+Subject: [PATCH] Semana 4: contrato Soroban en Testnet integrado al front
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- contracts/: contrato de Marvin (registro de nodos y de reportes con
+  verificación ed25519 en la red), 10 pruebas y wasm desplegado.
+- Contrato desplegado en Testnet: CD5LRX24DHEDDHS47TN7IFBD4EMAZSLDTABA7Z7UPDYN3I7ZGI5RRGDR
+- frontend: la puerta de enlace publica de verdad en el contrato y el
+  registro público lo consulta; scripts de despliegue y administración.
+- docs/semana4: documentación y evidencia del despliegue.
+- LICENSE (MIT) y nota de uso de IA en el README.
+---
+ .gitignore                         |    5 +
+ LICENSE                            |   21 +
+ README.md                          |   17 +-
+ contracts/Cargo.lock               | 2001 ++++++++++++++++++++++++++++
+ contracts/Cargo.toml               |   17 +
+ contracts/dist/marvin.wasm         |  Bin 0 -> 11319 bytes
+ contracts/marvin/Cargo.toml        |   19 +
+ contracts/marvin/src/lib.rs        |  169 +++
+ contracts/marvin/src/test.rs       |  187 +++
+ docs/semana4/Despliegue.md         |   32 +
+ docs/semana4/Documentacion.md      |  102 ++
+ frontend/package-lock.json         | 1035 +++++++++++++-
+ frontend/package.json              |    7 +-
+ frontend/scripts/admin.ts          |   33 +
+ frontend/scripts/desplegar.ts      |   44 +
+ frontend/scripts/despliegue.ts     |  148 ++
+ frontend/src/components/Layout.tsx |   18 +-
+ frontend/src/components/ui.tsx     |    1 +
+ frontend/src/contrato.json         |    5 +
+ frontend/src/lib/crypto.ts         |    8 +
+ frontend/src/lib/model.ts          |    1 +
+ frontend/src/lib/stellar.ts        |  211 +++
+ frontend/src/lib/store.tsx         |  148 +-
+ frontend/src/pages/Admin.tsx       |   10 +-
+ frontend/src/pages/Gateway.tsx     |   67 +-
+ frontend/src/pages/Inicio.tsx      |   23 +-
+ frontend/src/pages/Mando.tsx       |    2 +-
+ frontend/src/pages/Registro.tsx    |   73 +-
+ frontend/tsconfig.app.json         |    1 +
+ frontend/vite.config.ts            |    1 +
+ 30 files changed, 4345 insertions(+), 61 deletions(-)
+ create mode 100644 .gitignore
+ create mode 100644 LICENSE
+ create mode 100644 contracts/Cargo.lock
+ create mode 100644 contracts/Cargo.toml
+ create mode 100755 contracts/dist/marvin.wasm
+ create mode 100644 contracts/marvin/Cargo.toml
+ create mode 100644 contracts/marvin/src/lib.rs
+ create mode 100644 contracts/marvin/src/test.rs
+ create mode 100644 docs/semana4/Despliegue.md
+ create mode 100644 docs/semana4/Documentacion.md
+ create mode 100644 frontend/scripts/admin.ts
+ create mode 100644 frontend/scripts/desplegar.ts
+ create mode 100644 frontend/scripts/despliegue.ts
+ create mode 100644 frontend/src/contrato.json
+ create mode 100644 frontend/src/lib/stellar.ts
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..da4e9d3
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++# Llave secreta de la cuenta administradora del contrato (no se versiona)
++.marvin-admin.json
++# Compilación del contrato
++contracts/target/
++contracts/marvin/test_snapshots/
+diff --git a/LICENSE b/LICENSE
+new file mode 100644
+index 0000000..df477ad
+--- /dev/null
++++ b/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Equipo Marvin (Franco Alejandro Mamani, Emanuel Guzman, Emanuel Conte, Aldo Duran)
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/README.md b/README.md
+index 84428f2..3cd368c 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,7 @@
+ 
+ - [Node.js](https://nodejs.org/) 20 o superior (incluye npm)
+ - Git
++- Solo para compilar o probar el contrato: [Rust](https://www.rust-lang.org/tools/install) con el target `wasm32v1-none` (`rustup target add wasm32v1-none`)
+ 
+ ## Instalación
+ 
+@@ -19,7 +20,7 @@ npm install
+ npm run dev
+ ```
+ 
+-Abrir http://localhost:5173 en el navegador.
++Abrir http://localhost:5173 en el navegador. El front ya está conectado al contrato desplegado en Stellar Testnet (`frontend/src/contrato.json`).
+ 
+ Para generar la versión de producción y verla localmente:
+ 
+@@ -27,3 +28,17 @@ Para generar la versión de producción y verla localmente:
+ npm run build
+ npm run preview
+ ```
++
++Contrato (opcional):
++
++```bash
++cd contracts
++cargo test                                              # pruebas del contrato
++cargo build --release --target wasm32v1-none            # compila el .wasm
++cp target/wasm32v1-none/release/marvin.wasm dist/       # lo deja listo para desplegar
++cd ../frontend && npm run desplegar -- --nuevo          # despliega uno nuevo en Testnet
++```
++
++---
++
++En el desarrollo de este proyecto usamos herramientas de inteligencia artificial.
+diff --git a/contracts/Cargo.lock b/contracts/Cargo.lock
+new file mode 100644
+index 0000000..58ce7b5
+--- /dev/null
++++ b/contracts/Cargo.lock
+@@ -0,0 +1,2001 @@
++# This file is automatically @generated by Cargo.
++# It is not intended for manual editing.
++version = 4
++
++[[package]]
++name = "ahash"
++version = "0.8.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
++dependencies = [
++ "cfg-if",
++ "once_cell",
++ "version_check",
++ "zerocopy",
++]
++
++[[package]]
++name = "android_system_properties"
++version = "0.1.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
++dependencies = [
++ "libc",
++]
++
++[[package]]
++name = "arbitrary"
++version = "1.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7d5a26814d8dcb93b0e5a0ff3c6d80a8843bafb21b39e8e18a6f05471870e110"
++dependencies = [
++ "derive_arbitrary",
++]
++
++[[package]]
++name = "ark-bls12-381"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c775f0d12169cba7aae4caeb547bb6a50781c7449a8aa53793827c9ec4abf488"
++dependencies = [
++ "ark-ec",
++ "ark-ff",
++ "ark-serialize",
++ "ark-std",
++]
++
++[[package]]
++name = "ark-ec"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "defd9a439d56ac24968cca0571f598a61bc8c55f71d50a89cda591cb750670ba"
++dependencies = [
++ "ark-ff",
++ "ark-poly",
++ "ark-serialize",
++ "ark-std",
++ "derivative",
++ "hashbrown 0.13.2",
++ "itertools",
++ "num-traits",
++ "zeroize",
++]
++
++[[package]]
++name = "ark-ff"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ec847af850f44ad29048935519032c33da8aa03340876d351dfab5660d2966ba"
++dependencies = [
++ "ark-ff-asm",
++ "ark-ff-macros",
++ "ark-serialize",
++ "ark-std",
++ "derivative",
++ "digest",
++ "itertools",
++ "num-bigint",
++ "num-traits",
++ "paste",
++ "rustc_version",
++ "zeroize",
++]
++
++[[package]]
++name = "ark-ff-asm"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3ed4aa4fe255d0bc6d79373f7e31d2ea147bcf486cba1be5ba7ea85abdb92348"
++dependencies = [
++ "quote",
++ "syn 1.0.109",
++]
++
++[[package]]
++name = "ark-ff-macros"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7abe79b0e4288889c4574159ab790824d0033b9fdcb2a112a3182fac2e514565"
++dependencies = [
++ "num-bigint",
++ "num-traits",
++ "proc-macro2",
++ "quote",
++ "syn 1.0.109",
++]
++
++[[package]]
++name = "ark-poly"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d320bfc44ee185d899ccbadfa8bc31aab923ce1558716e1997a1e74057fe86bf"
++dependencies = [
++ "ark-ff",
++ "ark-serialize",
++ "ark-std",
++ "derivative",
++ "hashbrown 0.13.2",
++]
++
++[[package]]
++name = "ark-serialize"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "adb7b85a02b83d2f22f89bd5cac66c9c89474240cb6207cb1efc16d098e822a5"
++dependencies = [
++ "ark-serialize-derive",
++ "ark-std",
++ "digest",
++ "num-bigint",
++]
++
++[[package]]
++name = "ark-serialize-derive"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ae3281bc6d0fd7e549af32b52511e1302185bd688fd3359fa36423346ff682ea"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 1.0.109",
++]
++
++[[package]]
++name = "ark-std"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
++dependencies = [
++ "num-traits",
++ "rand",
++]
++
++[[package]]
++name = "autocfg"
++version = "1.5.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
++
++[[package]]
++name = "base16ct"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
++
++[[package]]
++name = "base64"
++version = "0.22.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
++
++[[package]]
++name = "base64"
++version = "0.23.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
++
++[[package]]
++name = "base64ct"
++version = "1.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
++
++[[package]]
++name = "bitflags"
++version = "1.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
++
++[[package]]
++name = "block-buffer"
++version = "0.10.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
++dependencies = [
++ "generic-array",
++]
++
++[[package]]
++name = "bs58"
++version = "0.5.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
++dependencies = [
++ "tinyvec",
++]
++
++[[package]]
++name = "bumpalo"
++version = "3.20.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
++
++[[package]]
++name = "byteorder"
++version = "1.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
++
++[[package]]
++name = "bytes-lit"
++version = "0.0.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0adabf37211a5276e46335feabcbb1530c95eb3fdf85f324c7db942770aa025d"
++dependencies = [
++ "num-bigint",
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "cc"
++version = "1.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6651c9ed80effdc7db0ff72512157f901af5e3549e341e24b1dd4887d836d838"
++dependencies = [
++ "find-msvc-tools",
++ "shlex",
++]
++
++[[package]]
++name = "cfg-if"
++version = "1.0.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
++
++[[package]]
++name = "cfg_eval"
++version = "0.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "45565fc9416b9896014f5732ac776f810ee53a66730c17e4020c3ec064a8f88f"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "chrono"
++version = "0.4.45"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
++dependencies = [
++ "iana-time-zone",
++ "num-traits",
++ "serde",
++ "windows-link",
++]
++
++[[package]]
++name = "const-oid"
++version = "0.9.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
++
++[[package]]
++name = "core-foundation-sys"
++version = "0.8.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
++
++[[package]]
++name = "cpufeatures"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
++dependencies = [
++ "libc",
++]
++
++[[package]]
++name = "crate-git-revision"
++version = "0.0.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c521bf1f43d31ed2f73441775ed31935d77901cb3451e44b38a1c1612fcbaf98"
++dependencies = [
++ "serde",
++ "serde_derive",
++ "serde_json",
++]
++
++[[package]]
++name = "crypto-bigint"
++version = "0.5.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
++dependencies = [
++ "generic-array",
++ "rand_core",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "crypto-common"
++version = "0.1.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
++dependencies = [
++ "generic-array",
++ "typenum",
++]
++
++[[package]]
++name = "ctor"
++version = "0.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "67773048316103656a637612c4a62477603b777d91d9c62ff2290f9cde178fdb"
++dependencies = [
++ "ctor-proc-macro",
++ "dtor",
++]
++
++[[package]]
++name = "ctor-proc-macro"
++version = "0.0.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e2931af7e13dc045d8e9d26afccc6fa115d64e115c9c84b1166288b46f6782c2"
++
++[[package]]
++name = "curve25519-dalek"
++version = "4.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
++dependencies = [
++ "cfg-if",
++ "cpufeatures",
++ "curve25519-dalek-derive",
++ "digest",
++ "fiat-crypto",
++ "rustc_version",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "curve25519-dalek-derive"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "darling"
++version = "0.20.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
++dependencies = [
++ "darling_core 0.20.11",
++ "darling_macro 0.20.11",
++]
++
++[[package]]
++name = "darling"
++version = "0.24.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ed17f5901b6630b993ca003def43f2f8ef4014fc13b047b57aad617ff32bc2ec"
++dependencies = [
++ "darling_core 0.24.1",
++ "darling_macro 0.24.1",
++]
++
++[[package]]
++name = "darling_core"
++version = "0.20.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
++dependencies = [
++ "fnv",
++ "ident_case",
++ "proc-macro2",
++ "quote",
++ "strsim",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "darling_core"
++version = "0.24.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6837e2cf7485aaae18f86181d2f0e9a7ed297a025e220aeabf63fdebd3a2ddff"
++dependencies = [
++ "ident_case",
++ "proc-macro2",
++ "quote",
++ "strsim",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "darling_macro"
++version = "0.20.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
++dependencies = [
++ "darling_core 0.20.11",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "darling_macro"
++version = "0.24.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
++dependencies = [
++ "darling_core 0.24.1",
++ "quote",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "data-encoding"
++version = "2.11.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
++
++[[package]]
++name = "defmt"
++version = "1.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e4a0795ac740cb54d7b3775c9c17345f6aaecf884c01733b39d6017738e0e3e1"
++dependencies = [
++ "bitflags",
++ "defmt-macros",
++]
++
++[[package]]
++name = "defmt-macros"
++version = "1.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "840bb056bd99c495c9188198a258ab787c79f306d864db3e6e8451442d6d8366"
++dependencies = [
++ "defmt-parser",
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "defmt-parser"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "71958f69fb2de856c5dd51ac9377e986ca1aa5919f931bf5395a807277f889a0"
++dependencies = [
++ "thiserror 2.0.21",
++]
++
++[[package]]
++name = "der"
++version = "0.7.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
++dependencies = [
++ "const-oid",
++ "zeroize",
++]
++
++[[package]]
++name = "deranged"
++version = "0.5.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
++dependencies = [
++ "serde_core",
++]
++
++[[package]]
++name = "derivative"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 1.0.109",
++]
++
++[[package]]
++name = "derive_arbitrary"
++version = "1.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "67e77553c4162a157adbf834ebae5b415acbecbeafc7a74b0e886657506a7611"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "digest"
++version = "0.10.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
++dependencies = [
++ "block-buffer",
++ "const-oid",
++ "crypto-common",
++ "subtle",
++]
++
++[[package]]
++name = "downcast-rs"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
++
++[[package]]
++name = "dtor"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "404d02eeb088a82cfd873006cb713fe411306c7d182c344905e101fb1167d301"
++dependencies = [
++ "dtor-proc-macro",
++]
++
++[[package]]
++name = "dtor-proc-macro"
++version = "0.0.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5"
++
++[[package]]
++name = "dyn-clone"
++version = "1.0.20"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
++
++[[package]]
++name = "ecdsa"
++version = "0.16.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
++dependencies = [
++ "der",
++ "digest",
++ "elliptic-curve",
++ "rfc6979",
++ "signature",
++]
++
++[[package]]
++name = "ed25519"
++version = "2.2.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
++dependencies = [
++ "pkcs8",
++ "signature",
++]
++
++[[package]]
++name = "ed25519-dalek"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
++dependencies = [
++ "curve25519-dalek",
++ "ed25519",
++ "rand_core",
++ "serde",
++ "sha2",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "either"
++version = "1.19.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
++
++[[package]]
++name = "elliptic-curve"
++version = "0.13.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
++dependencies = [
++ "base16ct",
++ "crypto-bigint",
++ "digest",
++ "ff",
++ "generic-array",
++ "group",
++ "rand_core",
++ "sec1",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "equivalent"
++version = "1.0.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
++
++[[package]]
++name = "escape-bytes"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
++
++[[package]]
++name = "ethnum"
++version = "1.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
++
++[[package]]
++name = "ff"
++version = "0.13.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
++dependencies = [
++ "rand_core",
++ "subtle",
++]
++
++[[package]]
++name = "fiat-crypto"
++version = "0.2.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
++
++[[package]]
++name = "find-msvc-tools"
++version = "0.1.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
++
++[[package]]
++name = "fnv"
++version = "1.0.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
++
++[[package]]
++name = "futures-core"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
++
++[[package]]
++name = "futures-task"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
++
++[[package]]
++name = "futures-util"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
++dependencies = [
++ "futures-core",
++ "futures-task",
++ "pin-project-lite",
++ "slab",
++]
++
++[[package]]
++name = "generic-array"
++version = "0.14.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4bb6743198531e02858aeaea5398fcc883e71851fcbcb5a2f773e2fb6cb1edf2"
++dependencies = [
++ "typenum",
++ "version_check",
++ "zeroize",
++]
++
++[[package]]
++name = "getrandom"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
++dependencies = [
++ "cfg-if",
++ "js-sys",
++ "libc",
++ "wasi",
++ "wasm-bindgen",
++]
++
++[[package]]
++name = "group"
++version = "0.13.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
++dependencies = [
++ "ff",
++ "rand_core",
++ "subtle",
++]
++
++[[package]]
++name = "hash32"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
++dependencies = [
++ "byteorder",
++]
++
++[[package]]
++name = "hashbrown"
++version = "0.12.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
++
++[[package]]
++name = "hashbrown"
++version = "0.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
++dependencies = [
++ "ahash",
++]
++
++[[package]]
++name = "hashbrown"
++version = "0.17.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
++
++[[package]]
++name = "heapless"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
++dependencies = [
++ "hash32",
++ "stable_deref_trait",
++]
++
++[[package]]
++name = "heck"
++version = "0.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
++
++[[package]]
++name = "hex"
++version = "0.4.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
++dependencies = [
++ "serde",
++]
++
++[[package]]
++name = "hex-literal"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
++
++[[package]]
++name = "hmac"
++version = "0.12.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
++dependencies = [
++ "digest",
++]
++
++[[package]]
++name = "iana-time-zone"
++version = "0.1.65"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
++dependencies = [
++ "android_system_properties",
++ "core-foundation-sys",
++ "iana-time-zone-haiku",
++ "js-sys",
++ "log",
++ "wasm-bindgen",
++ "windows-core",
++]
++
++[[package]]
++name = "iana-time-zone-haiku"
++version = "0.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
++dependencies = [
++ "cc",
++]
++
++[[package]]
++name = "ident_case"
++version = "1.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
++
++[[package]]
++name = "indexmap"
++version = "1.9.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
++dependencies = [
++ "autocfg",
++ "hashbrown 0.12.3",
++ "serde",
++]
++
++[[package]]
++name = "indexmap"
++version = "2.14.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
++dependencies = [
++ "equivalent",
++ "hashbrown 0.17.1",
++ "serde",
++ "serde_core",
++]
++
++[[package]]
++name = "indexmap-nostd"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8e04e2fd2b8188ea827b32ef11de88377086d690286ab35747ef7f9bf3ccb590"
++
++[[package]]
++name = "itertools"
++version = "0.10.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
++dependencies = [
++ "either",
++]
++
++[[package]]
++name = "itoa"
++version = "1.0.18"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
++
++[[package]]
++name = "jiff"
++version = "0.2.38"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b2b005715dcbeb0089a3c0dab99f2ff1cc3b2525323552703d648585d342a383"
++dependencies = [
++ "defmt",
++ "jiff-core",
++ "jiff-static",
++ "jiff-tzdb-platform",
++ "log",
++ "portable-atomic",
++ "portable-atomic-util",
++ "serde_core",
++ "windows-link",
++]
++
++[[package]]
++name = "jiff-core"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5e52fe76043ccecc9005d2305ebaadf7d7fc0cc89ca6baa10a94d6bc68c7128c"
++dependencies = [
++ "defmt",
++ "log",
++]
++
++[[package]]
++name = "jiff-static"
++version = "0.2.38"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2cc9817253cf7c7ee4684451bd327e88d6f3658014e54a29198625590650695c"
++dependencies = [
++ "jiff-core",
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "jiff-tzdb"
++version = "0.1.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
++
++[[package]]
++name = "jiff-tzdb-platform"
++version = "0.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
++dependencies = [
++ "jiff-tzdb",
++]
++
++[[package]]
++name = "js-sys"
++version = "0.3.106"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7883d941dae510fb2d978fc3fe018c71c9e2892fd38854de3e8b92c2e5ad9cc5"
++dependencies = [
++ "cfg-if",
++ "futures-util",
++ "wasm-bindgen",
++]
++
++[[package]]
++name = "k256"
++version = "0.13.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
++dependencies = [
++ "cfg-if",
++ "ecdsa",
++ "elliptic-curve",
++ "sha2",
++]
++
++[[package]]
++name = "keccak"
++version = "0.1.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
++dependencies = [
++ "cpufeatures",
++]
++
++[[package]]
++name = "libc"
++version = "0.2.191"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
++
++[[package]]
++name = "libm"
++version = "0.2.16"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
++
++[[package]]
++name = "log"
++version = "0.4.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
++
++[[package]]
++name = "macro-string"
++version = "0.1.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1b27834086c65ec3f9387b096d66e99f221cf081c2b738042aa252bcd41204e3"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "marvin"
++version = "0.1.0"
++dependencies = [
++ "ed25519-dalek",
++ "rand",
++ "soroban-sdk",
++]
++
++[[package]]
++name = "memchr"
++version = "2.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
++
++[[package]]
++name = "num-bigint"
++version = "0.4.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
++dependencies = [
++ "num-integer",
++ "num-traits",
++]
++
++[[package]]
++name = "num-conv"
++version = "0.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
++
++[[package]]
++name = "num-derive"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "num-integer"
++version = "0.1.47"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
++dependencies = [
++ "num-traits",
++]
++
++[[package]]
++name = "num-traits"
++version = "0.2.19"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
++dependencies = [
++ "autocfg",
++]
++
++[[package]]
++name = "once_cell"
++version = "1.21.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
++
++[[package]]
++name = "p256"
++version = "0.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
++dependencies = [
++ "ecdsa",
++ "elliptic-curve",
++ "primeorder",
++ "sha2",
++]
++
++[[package]]
++name = "paste"
++version = "1.0.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
++
++[[package]]
++name = "pin-project-lite"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
++
++[[package]]
++name = "pkcs8"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
++dependencies = [
++ "der",
++ "spki",
++]
++
++[[package]]
++name = "portable-atomic"
++version = "1.15.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
++
++[[package]]
++name = "portable-atomic-util"
++version = "0.2.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715"
++dependencies = [
++ "portable-atomic",
++]
++
++[[package]]
++name = "powerfmt"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
++
++[[package]]
++name = "ppv-lite86"
++version = "0.2.21"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
++dependencies = [
++ "zerocopy",
++]
++
++[[package]]
++name = "prettyplease"
++version = "0.2.37"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
++dependencies = [
++ "proc-macro2",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "primeorder"
++version = "0.13.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
++dependencies = [
++ "elliptic-curve",
++]
++
++[[package]]
++name = "proc-macro2"
++version = "1.0.107"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
++dependencies = [
++ "unicode-ident",
++]
++
++[[package]]
++name = "quote"
++version = "1.0.47"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
++dependencies = [
++ "proc-macro2",
++]
++
++[[package]]
++name = "rand"
++version = "0.8.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
++dependencies = [
++ "libc",
++ "rand_chacha",
++ "rand_core",
++]
++
++[[package]]
++name = "rand_chacha"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
++dependencies = [
++ "ppv-lite86",
++ "rand_core",
++]
++
++[[package]]
++name = "rand_core"
++version = "0.6.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
++dependencies = [
++ "getrandom",
++]
++
++[[package]]
++name = "ref-cast"
++version = "1.0.27"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7e440fb4e4b4147295338efb76001ab9e4efc0e5839df2c47fc5ac2381d365c3"
++dependencies = [
++ "ref-cast-impl",
++]
++
++[[package]]
++name = "ref-cast-impl"
++version = "1.0.27"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "rfc6979"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
++dependencies = [
++ "hmac",
++ "subtle",
++]
++
++[[package]]
++name = "rustc_version"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
++dependencies = [
++ "semver",
++]
++
++[[package]]
++name = "rustversion"
++version = "1.0.23"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
++
++[[package]]
++name = "schemars"
++version = "0.8.22"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
++dependencies = [
++ "dyn-clone",
++ "serde",
++ "serde_json",
++]
++
++[[package]]
++name = "schemars"
++version = "0.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
++dependencies = [
++ "dyn-clone",
++ "ref-cast",
++ "serde",
++ "serde_json",
++]
++
++[[package]]
++name = "schemars"
++version = "1.2.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
++dependencies = [
++ "dyn-clone",
++ "ref-cast",
++ "serde",
++ "serde_json",
++]
++
++[[package]]
++name = "sec1"
++version = "0.7.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
++dependencies = [
++ "base16ct",
++ "der",
++ "generic-array",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "semver"
++version = "1.0.28"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
++
++[[package]]
++name = "serde"
++version = "1.0.229"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
++dependencies = [
++ "serde_core",
++ "serde_derive",
++]
++
++[[package]]
++name = "serde_core"
++version = "1.0.229"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
++dependencies = [
++ "serde_derive",
++]
++
++[[package]]
++name = "serde_derive"
++version = "1.0.229"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "serde_json"
++version = "1.0.154"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
++dependencies = [
++ "itoa",
++ "memchr",
++ "serde",
++ "serde_core",
++ "zmij",
++]
++
++[[package]]
++name = "serde_with"
++version = "3.24.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "df9adc193c780ef8f159aee8b61e2d5801aaa555e6eb0947fe45530ec506296f"
++dependencies = [
++ "base64 0.23.1",
++ "bs58",
++ "chrono",
++ "hex",
++ "indexmap 1.9.3",
++ "indexmap 2.14.2",
++ "jiff",
++ "schemars 0.8.22",
++ "schemars 0.9.0",
++ "schemars 1.2.3",
++ "serde_core",
++ "serde_json",
++ "serde_with_macros",
++ "time",
++]
++
++[[package]]
++name = "serde_with_macros"
++version = "3.24.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3e17bbc68e28663bbbb90df47e058aa7eda4fb445b89fe70457bb94fbccf6e49"
++dependencies = [
++ "darling 0.24.1",
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "sha2"
++version = "0.10.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
++dependencies = [
++ "cfg-if",
++ "cpufeatures",
++ "digest",
++]
++
++[[package]]
++name = "sha3"
++version = "0.10.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
++dependencies = [
++ "digest",
++ "keccak",
++]
++
++[[package]]
++name = "shlex"
++version = "2.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
++
++[[package]]
++name = "signature"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
++dependencies = [
++ "digest",
++ "rand_core",
++]
++
++[[package]]
++name = "slab"
++version = "0.4.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
++
++[[package]]
++name = "smallvec"
++version = "1.16.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
++
++[[package]]
++name = "soroban-builtin-sdk-macros"
++version = "23.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d9336adeabcd6f636a4e0889c8baf494658ef5a3c4e7e227569acd2ce9091e85"
++dependencies = [
++ "itertools",
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "soroban-env-common"
++version = "23.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "00067f52e8bbf1abf0de03fe3e2fbb06910893cfbe9a7d9093d6425658833ff3"
++dependencies = [
++ "arbitrary",
++ "crate-git-revision",
++ "ethnum",
++ "num-derive",
++ "num-traits",
++ "serde",
++ "soroban-env-macros",
++ "soroban-wasmi",
++ "static_assertions",
++ "stellar-xdr",
++ "wasmparser",
++]
++
++[[package]]
++name = "soroban-env-guest"
++version = "23.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ccd1e40963517b10963a8e404348d3fe6caf9c278ac47a6effd48771297374d6"
++dependencies = [
++ "soroban-env-common",
++ "static_assertions",
++]
++
++[[package]]
++name = "soroban-env-host"
++version = "23.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b9766c5ad78e9d8ae10afbc076301f7d610c16407a1ebb230766dbe007a48725"
++dependencies = [
++ "ark-bls12-381",
++ "ark-ec",
++ "ark-ff",
++ "ark-serialize",
++ "curve25519-dalek",
++ "ecdsa",
++ "ed25519-dalek",
++ "elliptic-curve",
++ "generic-array",
++ "getrandom",
++ "hex-literal",
++ "hmac",
++ "k256",
++ "num-derive",
++ "num-integer",
++ "num-traits",
++ "p256",
++ "rand",
++ "rand_chacha",
++ "sec1",
++ "sha2",
++ "sha3",
++ "soroban-builtin-sdk-macros",
++ "soroban-env-common",
++ "soroban-wasmi",
++ "static_assertions",
++ "stellar-strkey 0.0.13",
++ "wasmparser",
++]
++
++[[package]]
++name = "soroban-env-macros"
++version = "23.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b0e6a1c5844257ce96f5f54ef976035d5bd0ee6edefaf9f5e0bcb8ea4b34228c"
++dependencies = [
++ "itertools",
++ "proc-macro2",
++ "quote",
++ "serde",
++ "serde_json",
++ "stellar-xdr",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "soroban-ledger-snapshot"
++version = "23.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fea7299402f5f445089fde192cc68587baf0cc6432be300bce99d997fd85b4cb"
++dependencies = [
++ "serde",
++ "serde_json",
++ "serde_with",
++ "soroban-env-common",
++ "soroban-env-host",
++ "thiserror 1.0.69",
++]
++
++[[package]]
++name = "soroban-sdk"
++version = "23.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dd1e11f9fd537f9df29ec1a66c1b78d666094df56e196565d292ebf9a72732b4"
++dependencies = [
++ "arbitrary",
++ "bytes-lit",
++ "crate-git-revision",
++ "ctor",
++ "derive_arbitrary",
++ "ed25519-dalek",
++ "rand",
++ "rustc_version",
++ "serde",
++ "serde_json",
++ "soroban-env-guest",
++ "soroban-env-host",
++ "soroban-ledger-snapshot",
++ "soroban-sdk-macros",
++ "stellar-strkey 0.0.16",
++ "visibility",
++]
++
++[[package]]
++name = "soroban-sdk-macros"
++version = "23.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "caa7114e2f031b6fbd30376e844f3c55f6daf56f6f9d33ce309f846ffced316d"
++dependencies = [
++ "darling 0.20.11",
++ "heck",
++ "itertools",
++ "macro-string",
++ "proc-macro2",
++ "quote",
++ "sha2",
++ "soroban-env-common",
++ "soroban-spec",
++ "soroban-spec-rust",
++ "stellar-xdr",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "soroban-spec"
++version = "23.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1303589e67e7c76d0571b8d797b75f9fa33a1ceb1b4361a981570a3ebf00ac19"
++dependencies = [
++ "base64 0.22.1",
++ "stellar-xdr",
++ "thiserror 1.0.69",
++ "wasmparser",
++]
++
++[[package]]
++name = "soroban-spec-rust"
++version = "23.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "956188f28b750b80a2bb4cd5698038746edae1be51ec19a29c7efc6dcd922e5f"
++dependencies = [
++ "prettyplease",
++ "proc-macro2",
++ "quote",
++ "sha2",
++ "soroban-spec",
++ "stellar-xdr",
++ "syn 2.0.119",
++ "thiserror 1.0.69",
++]
++
++[[package]]
++name = "soroban-wasmi"
++version = "0.31.1-soroban.20.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "710403de32d0e0c35375518cb995d4fc056d0d48966f2e56ea471b8cb8fc9719"
++dependencies = [
++ "smallvec",
++ "spin",
++ "wasmi_arena",
++ "wasmi_core",
++ "wasmparser-nostd",
++]
++
++[[package]]
++name = "spin"
++version = "0.9.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
++
++[[package]]
++name = "spki"
++version = "0.7.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
++dependencies = [
++ "base64ct",
++ "der",
++]
++
++[[package]]
++name = "stable_deref_trait"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
++
++[[package]]
++name = "static_assertions"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
++
++[[package]]
++name = "stellar-strkey"
++version = "0.0.13"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ee1832fb50c651ad10f734aaf5d31ca5acdfb197a6ecda64d93fcdb8885af913"
++dependencies = [
++ "crate-git-revision",
++ "data-encoding",
++]
++
++[[package]]
++name = "stellar-strkey"
++version = "0.0.16"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "084afcb0d458c3d5d5baa2d294b18f881e62cc258ef539d8fdf68be7dbe45520"
++dependencies = [
++ "crate-git-revision",
++ "data-encoding",
++ "heapless",
++]
++
++[[package]]
++name = "stellar-xdr"
++version = "23.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "89d2848e1694b0c8db81fd812bfab5ea71ee28073e09ccc45620ef3cf7a75a9b"
++dependencies = [
++ "arbitrary",
++ "base64 0.22.1",
++ "cfg_eval",
++ "crate-git-revision",
++ "escape-bytes",
++ "ethnum",
++ "hex",
++ "serde",
++ "serde_with",
++ "sha2",
++ "stellar-strkey 0.0.13",
++]
++
++[[package]]
++name = "strsim"
++version = "0.11.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
++
++[[package]]
++name = "subtle"
++version = "2.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
++
++[[package]]
++name = "syn"
++version = "1.0.109"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "unicode-ident",
++]
++
++[[package]]
++name = "syn"
++version = "2.0.119"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "unicode-ident",
++]
++
++[[package]]
++name = "syn"
++version = "3.0.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "unicode-ident",
++]
++
++[[package]]
++name = "thiserror"
++version = "1.0.69"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
++dependencies = [
++ "thiserror-impl 1.0.69",
++]
++
++[[package]]
++name = "thiserror"
++version = "2.0.21"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
++dependencies = [
++ "thiserror-impl 2.0.21",
++]
++
++[[package]]
++name = "thiserror-impl"
++version = "1.0.69"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "thiserror-impl"
++version = "2.0.21"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++]
++
++[[package]]
++name = "time"
++version = "0.3.55"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cdb87b95ec50ddfa440816d227a17b2ccbdda963a316a727fda0fc4334f7d134"
++dependencies = [
++ "deranged",
++ "num-conv",
++ "powerfmt",
++ "serde_core",
++ "time-core",
++ "time-macros",
++]
++
++[[package]]
++name = "time-core"
++version = "0.1.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
++
++[[package]]
++name = "time-macros"
++version = "0.2.32"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
++dependencies = [
++ "num-conv",
++ "time-core",
++]
++
++[[package]]
++name = "tinyvec"
++version = "1.13.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
++
++[[package]]
++name = "typenum"
++version = "1.20.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
++
++[[package]]
++name = "unicode-ident"
++version = "1.0.27"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
++
++[[package]]
++name = "version_check"
++version = "0.9.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
++
++[[package]]
++name = "visibility"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d674d135b4a8c1d7e813e2f8d1c9a58308aee4a680323066025e53132218bd91"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "wasi"
++version = "0.11.1+wasi-snapshot-preview1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
++
++[[package]]
++name = "wasm-bindgen"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9bb54f33acc68fd454578d9820b0bde1a1a3d17aa17bb7b6595806d02886d409"
++dependencies = [
++ "cfg-if",
++ "once_cell",
++ "rustversion",
++ "wasm-bindgen-macro",
++ "wasm-bindgen-shared",
++]
++
++[[package]]
++name = "wasm-bindgen-macro"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2e29d0c35b16e224a7eeb5cd2d25e3e1968fbd65604117b44d3b789d00ee8535"
++dependencies = [
++ "quote",
++ "wasm-bindgen-macro-support",
++]
++
++[[package]]
++name = "wasm-bindgen-macro-support"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6f501a8bc3719dba86ef8ae4728879c08001bea749eb1333ac5b91e040e2a6b7"
++dependencies = [
++ "bumpalo",
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++ "wasm-bindgen-shared",
++]
++
++[[package]]
++name = "wasm-bindgen-shared"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
++dependencies = [
++ "unicode-ident",
++]
++
++[[package]]
++name = "wasmi_arena"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "104a7f73be44570cac297b3035d76b169d6599637631cf37a1703326a0727073"
++
++[[package]]
++name = "wasmi_core"
++version = "0.13.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dcf1a7db34bff95b85c261002720c00c3a6168256dcb93041d3fa2054d19856a"
++dependencies = [
++ "downcast-rs",
++ "libm",
++ "num-traits",
++ "paste",
++]
++
++[[package]]
++name = "wasmparser"
++version = "0.116.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a58e28b80dd8340cb07b8242ae654756161f6fc8d0038123d679b7b99964fa50"
++dependencies = [
++ "indexmap 2.14.2",
++ "semver",
++]
++
++[[package]]
++name = "wasmparser-nostd"
++version = "0.100.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d5a015fe95f3504a94bb1462c717aae75253e39b9dd6c3fb1062c934535c64aa"
++dependencies = [
++ "indexmap-nostd",
++]
++
++[[package]]
++name = "windows-core"
++version = "0.62.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
++dependencies = [
++ "windows-implement",
++ "windows-interface",
++ "windows-link",
++ "windows-result",
++ "windows-strings",
++]
++
++[[package]]
++name = "windows-implement"
++version = "0.60.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "windows-interface"
++version = "0.59.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "windows-link"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
++
++[[package]]
++name = "windows-result"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
++dependencies = [
++ "windows-link",
++]
++
++[[package]]
++name = "windows-strings"
++version = "0.5.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091"
++dependencies = [
++ "windows-link",
++]
++
++[[package]]
++name = "zerocopy"
++version = "0.8.63"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
++dependencies = [
++ "zerocopy-derive",
++]
++
++[[package]]
++name = "zerocopy-derive"
++version = "0.8.63"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "zeroize"
++version = "1.9.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
++dependencies = [
++ "zeroize_derive",
++]
++
++[[package]]
++name = "zeroize_derive"
++version = "1.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "zmij"
++version = "1.0.23"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+diff --git a/contracts/Cargo.toml b/contracts/Cargo.toml
+new file mode 100644
+index 0000000..b4f33d8
+--- /dev/null
++++ b/contracts/Cargo.toml
+@@ -0,0 +1,17 @@
++[workspace]
++resolver = "2"
++members = ["marvin"]
++
++[profile.release]
++opt-level = "z"
++overflow-checks = true
++debug = 0
++strip = "symbols"
++debug-assertions = false
++panic = "abort"
++codegen-units = 1
++lto = true
++
++[profile.release-with-logs]
++inherits = "release"
++debug-assertions = true
+diff --git a/contracts/dist/marvin.wasm b/contracts/dist/marvin.wasm
+new file mode 100755
+index 0000000000000000000000000000000000000000..e309b01fba603876ea1f76ed80af13dd9b2b454b
+GIT binary patch
+literal 11319
+zcmb_idypK*S?}(d-P^m_lUlNsoX=qQZm8nqvX#^OWT-@QlI$3p*j5ar_~*2`9pqcx
+z-JbRyrI?gXw&h2h*a#9Hi6K@X;1F;im=G|8sG=$e;3OsqNq{^EPlrc%2I4?4zu(t0
+zv$Lx^*`d7B&GdAC{k^}hzwQ~;Se(;JDgAMM^$~qapE_br@fw_xn?f^0Q@U1HSJe@-
+zy2?JZ@laY_J(YE?O6MsBEQFGVUOiIgY?)tKWdj#MB9jG)CPEEtXsjLy06_Y@tsYT=
+zN(g!+B|#zp!U#CP56@+CBCUY8RdZ~Up3&owY(`Jv+K~21y<KTNn_kDIJ*AAE#;DOJ
+z^-dMwx(nA?y;p^LPVYniiarL&Io&|dQQeYR6SyAL6H0;85`X2=KxMF8Dh-x~N<%|v
+z$geEFAW)I2s$pEC4I8Zrpz#d~0Gsf)`LfbL_43V^ZFyOD%F9Q#TroQ0pRfG3Zyy;M
+z*|KHJ6<2KDJi28B&sVBawHgc$+s)Oht_n+fL2F$KwAxgzg{wL~efqqLR#klV?ltZM
+z59z2pm&~<0Z!l_jYHGSYzqr&{o?dEqR9tE_=Vs>B<X~fVsWCO*Zno8dK|(C!xuXt7
+z?3!v!FU_p9)uBzD<k$=*H#$?DWTD+zO4JS2PO{RTMvqLsQBMVWXlkn20J>zp8JK8l
+z>dvIGFm<%Cm;}Ml`wyLJX}$W2)A*^_9<K-AAx*R2?005speD`j!^#CtJ7d2<AoK@g
+zMjb*g2KNT4Y9a@StwCjPP(hz&pGM!LLMw7XY+D{_be}fxj8hj;OY#4?$DdM&^^HO!
+z!xspRdI+SGx>h1oTxq$`KFewL!MiEJc_ot^pemE9Rw8Sqel~6Z7kXVT{($I&RxQMA
+z2u3;3BF>^TO>It5PsVGi9y}gDuTRtsn79F)o49=Aum%&M3+%n*t`<O7(xK7y*QA3k
+z9YLJXKHwq9FhwL~(2KsTP0(d_JU39PvY#Ll;fuDgU~i-)Jj#Xo5hd}0|Mrgv9s~85
+zxwdY28>@%M>m^rm=H@GF(lg@1I9RHeT4a38IENOr9YD%M!`g*_)%HuCE_el60G4<I
+zl6bXMGgTEua2Ogs*7l!8&T{GxkgM$VIG%aMp+0jM?=8*%R@;wrx&d)Gowx*C3XWN+
+z1)!FBmJ6asO+c%f%$LuruC6qkS2RVDFb!(a_RC%b=u9jdtD5mr#`XrtDVj7badDZF
+z$`!<8RH~?Xqy-KN8n!(e{%)_~iF)aHz3j?e4Ua)x&~TX=gNDZ)TIH^WOMoqCI8|+#
+z8U~VH4TA%dY8cKc5eKcMo_bzoD&9<g(v#2w9PjNEJo-*{QNfS$Q3l>j7eqkG-Toc>
+zN2Bi*>%@lI0en8A9!zTcIl>?n#G1nb!0ykoTcTlu(S})<+J)VsuNh-{+&MG0rg#By
+z_<v5r-WvkN=@8nroQgkx`aA;t&pf~I%wgD)zA#3ILJKJDCpfw{7)j^gHqx?>vy*u$
+zMf7YxB1}#ZaUy028hDFL2%NJ2)TP=5wwNZm7BKNEWxp!KkN{I+U+*WTzZGI#;Pr`t
+z6qG=2w+8MuW@Zy-(dEL8Q2)bBym`tighr-p2Rhyp>S1QrZia_2Tmd*Dru6{~*JqeO
+z=|3aNL8i1^E;O7(Vt?E|LXR5d8j$-U*?DgOFBr%&aDg4TNhpC3#^Vx%E=(iP=NV=e
+zvP?-;y)^l}zIXCzbr_s##MHZ~>9`DPW&5vWX%x+I;nMynpD__kj$@+XoP7QA{grxI
+z5Qbdw@-fbss10~b6bm8q_Zcz-Z?;TjOQC>sod97;6Wadc3xN;je8SP~+tvs7jE>cZ
+z)@79IM|sjc`1l@kEt-RS1BYA0h)@nIw8d?J_Veo^ZbN{6l^OF(Hl^q>SM)N*d>-|g
+zZ$wr)ok7Pr@*CB9;4s73cXI#<=Wlr*El&B_wWc87+rR9c(ub4~f6)tZ>BZxh2yEak
+zFR*x=?THVUuN?F>OxO6=4G-hfo;V3h18UBPhgmy3KJQr`Gd9-Z)mwuRM5`~Aped#h
+zD&3{&njw<w*Vv!q^k@+gymski;F15}1qH8IP*CWCAvhxJjWq$J7^m4vT<Wbjq(n+9
+z4pd4#70&NdEjiJyT7V5pDCtUC6di$Xg>;bwK+ppaDup3m`8bw68A6`IlKG37dSqNM
+z&|L!-ZrSRbOMyBjNEf^p79>+>be$?X0aTvW0K)#ptXB0wUx}^}=)Cx4axqq1=_1f~
+z8fd7TWwMLPGZBsDUBNJ{U7!FWjjwIlk7m+~)i{U*CW<MlE+0f9!XTDIZNGBSOc+nl
+zVgY;WMT1B(GC0;xGxd})j7z!*m?x-z<O%BE*K1NnLvuPVrrCcX8F&rtlb5c{eZGc^
+zE*+jf$=OBAtW(=v8q1HrBv}6VCBgEZ7m4MEi)9eDUEMM$%*!Atf&B8qphn^M#H71_
+z@?MazZ>)t(J4lGguik}xj$?ko;#i?M7+q;CjVi$JFh<o2*yO!0Qi4~(@$-rT5~!4t
+zvQH8NG7orD@y3?V*fouZoE;tgKyf-UOFlimx@Dgs2EZeIC_Klf?>>K8*`H52Q<6#G
+zDvG&=c(XWnI=Z8~n*~;#G6f(q#3B=ys~J7nW)^j3CEHhMAhaJ4;yOn<X|Qj-B-Tt~
+z3*5+OpGgsDd)~K59AlG@JpJ6~5Mh;+1>pl6*(cHo<ckR2$7lODypEzLlP;R;a>1Hu
+zZQ)+Mu5cneCH!DYkD#Rgem-NV)!i!1sp#e|HE1$(P}8-K;ogXaH+JYOD>#G;5dO3f
+zFkQ}%_uyKaaZ10oRh-!6w}|w5MeU_l^wokep6LjD->&mLV9^7*d}ALZMo7()o8cXz
+z28fgM4QalqPrL*^_1mJ5E@Jr91OG3dQWyKwd%p3$5Amn~d{c$FI4{<#UUbAr8DsV{
+zE%ipshc1@xP}ktd4Hp?4S;5D+MuPC+4deepiYH4G(I-t8%`@=$avILqA9IDmnF2iz
+zn_^bEST^?tW4NJgz?M3mXyNh+#VcYeW4=6QCRl}`O5PgmNA~Ce#KI|g!S#Uwx`+=&
+z`kG*-7Yr-ykBLZKY@sjQx%&|MSY3;V$6J1*!a<xH_`^5u{GDciVKEL_+dCW)fP4F4
+zkDU*dy=DTqyu1@F`>Py6Ay$r`QH4c7MZXv7AUh*Dr;pbwsZLQlP?>Ne`cj2O=|~*Z
+z23>^_Eji8XhxJQXhvMMoVTE>JB`9V8Kgji{!j#}J8@Dmcd`zc?2CzKg3gx|%%=u%3
+zA)G7>Vrw4j+7N)skH`81cd&)I9_s|Kq9Ezwfsld+)I&kx$&U9<B@5`mwynY)S%sVX
+zPm0<+g-?r~C?$FQlT>RJSK4Ea03mep8r%l=m}X9&1rfP{qF#?16m?rV-TQP`P;`UK
+z#|q^7A>wlnm*aCExyt_3+CcgEpZamC;Isx+@Ng10@V9^))O{yzVEQZuCm;FrbB})E
+zGhYOQ58^RZfmg(Xkn)$iv@rUtYS~|5PrBm7sx|~$(jctpAUcmhhxQm6<($qcySMk|
+zuY7%Q`g%3sjL)%#YqSJuaou2wk^<bs11<Y5;byJzTzIdXK9GFWtH$J68+#}FSAta8
+z-{C#lkapN#lgGmNulINSMt{d|O2=r9(xJX$9J-SI-G11oq~i*dF4;+(*=-byw(tz1
+zDryvq9^}O!jXjj~JkJR2TX<d~VU}&<q?BW5;rPY=JMl}Qo#BV`!3p5r9#iy=b$4tT
+ziTip;q~#^!BeeJXA#T;|aK3TGX4U?i5H9ifx_eeF`!D7g?ljXA?lpFk+0q;xWJ#y?
+z7}g5m9#h3F*kgDSVZ4uN`WVJsa6ArH>NwAGT3S?haMP80%;nL(?uyW-K%@2wvh+;q
+zV`RCgnz_D`yP$kj*Q7RP!n(0%)=&_Sy^XzxBQ=UGBFo!_%n<!s=gW#tATdyh2GECQ
+zgd@$hhDRwpN*(Bf7id-4=P1Q!^n-nlQ;0S=0BjPN{Rk;oQQQCJl=O9o^KV0t2)IKF
+z7|+NUAkg&~9yHi*bmv5`FVZSjP=Nby!qMeer;=N)4S&c^&_`W>0}fC`X$~<)@H#=~
+zL5Z_p%FLyVI<Wu2Nu!8NVu5b|lh4uR+2eol(Y}cakFJzXe<}?~e>(k5KmYb3vpo($
+zq)!uw9t-Z$fD*l8f7`!f%_C?V-s)ru1*13)<ssuo<&e=I)f6=utquOM^}w&uctrtI
+z5p$4Y_Q#E|k>c?J7S&IQE)K6N8uxcJf=?T=v4Nu-`#k3%9`o$epB*v>%<focRi2>4
+zJ-5SnaL=k&xrBY!Mqd-YvXdz=`gQ5>FBg1PwErVr>3ng;9$%+>gY^t&TJWz4QqU}C
+zrG{8nv&D$&p#m?oUlgu#XA?z5J$#=QSIhh_P4IV1=MX&90s&l6n&`}$_ec}c(%ZN(
+z7uE6MO!479c>sBgKyCN;K0Y9i6~t`Tc#|}sXn{v&en>h}IzJ*0!pd1`B5`Or8VJug
+zlQ!&IWN4eBx494nFQYPp3bIBH{$>HkTX;l@E2ZE$HWy|SvYGbb^+`V>Lv*sq%7f7d
+zxFi)%3ev=D_LH@E5Tztfj{<q5M{<pz|Amv4`zJSW;jAKa`4hwIl(G-eD&+GzRfz+Z
+z@@Y`BP>H#S5MIZ+RfGQIeHn0-?{~p=HFyRGCwx7rxaeT*iLs^3rjbaV2gVSo$O8t1
+zv;=BdUKvPv41VRMH_9#*ZS4m<p9X)Lb-R#*YVuxMOh*;)%tBsbZc^VK-NR}sPRa2#
+za{MK}L>3+C__mgG4c!D;b^Kuz;Di{xX;_oH__1yWb%6p*QxVrICKMeX;wxEjq2t4B
+zv6hH$Mhi-a0{~%)!IUUMD>ZYpqerOc{ZD<r=vvb*W!j}j51$S7aJI3q$NjrJE;P4t
+zl0UA3ww=O?eu8h8v5CWL6^!^7KCXQ0Fqhc@n3zlr(0&7Wzl@tV8TNS&uTm@V8&A{+
+z(dm_g*VFYOq8tF7p_;}Hq3pt2hp`vqiX^_IW1OmStA|@z%pcIns<3yp<pw%6gQ6F2
+zU}KO!UPtLGTM*-hJTI}XmGK4>W3?*y3YKcaX1|MKlY*67ZV2yiU#Zo1X-1i=k{TAA
+zDuf)4uU^D7RT}_jcuNJvWAXsmj=+x#VN_7(3nn?;kXsqMq75P+_D3fm7`?x?5pY%f
+zk=qSYg+RYy3ryClJQy)?i4SpQiEr{_yj9*9f!0te&qk2n0J<$dhe}2WVRyVl>IkM<
+zHF7*ttkS(Y&`YeBg#RVza(Jb~$b#4KU@>g5W-<h*c1NKcXm|krCHgk0vJs^xz|oL{
+z)!=<7r2v##eZX5?gKsjFMs30Btlk|4kW(L)bc`BTt609VIjbA<%d?Hyq<Jjq@Pn6y
+z<)pLJSeltj7MB`x3rjN#ZH1pzC0t9mmvN794{_g^K5xN&5YJbo{jq$5qtqRE=DgPe
+zaWfq|oPKAsfad{>UG)1@v;p7i;G3N3rNxD0dIeuV<-hdnp8Q#(bs7H1O!g}s>U8iW
+zko>ZKOAcP!j+gO`(9B&8d=#V<=kjM$jt(v_%+5^vG2@3+^$y5?)BH+fc1Gp|X}^uB
+zwVURXllXclna5{Co(JL_yQS?;EGPVHHe53AW*e@PG#x%KazM`q`O;`ximP(ie}hDx
+zsN5Z|X)NC9n#pViDA-_*#7(z5otb0FwQg}n+R5TVd%l@?OeL|TAPt^XD)=gz4u9Kj
+z5#zcyxI5dOh8z37`I(bj$ydhYg(pGDe+JcTdt7Dj5Q2<4yylkK#!BKAE<AOVI&w*K
+z$L`(R_X(Hu8Z;a<dn}pv^FwwPc{s2PEj0)RZFnE!Loz?xm=;yJ**5x#{lb$e4<1Z-
+zppE$(%pKD|Q(v#%?p7{5fe*Uo8tx+>bUUD#*~Y?Rn-4o(XBlLV&bA>eb&tMX?ymMc
+zt*|n)h%O-(rhcCJ%YlQ!E59LgV{O372V;$`<bGCE0p^$I9mU+{Ue^Zmuvdd_FQ1b&
+z+a1AM_zF!J&U~&UNTe&blb1-T?>Ufut(L3%dN;k?m_4yPlfZt^3TRKa=N3Bcqm2$-
+z0gT*9pMj5Dc-KX?EPVae!$Zh91sj1k`pv*IfGYZA##hgmbLhO3EF8<m4;+^7>DE%6
+zTSz)hM3#e!A<U(9+525y7yqSnx#M;4u~sroCs>Bj7vUOiCAsTb*O-O>EiTL^$Dl*l
+z&ZnHE)c^awDijrD@)UDW=9dIGp2jgL!3YxL?uTYNbC64dKlK;a$g|M4p@YfFax#n1
+z0t@pOo|;QK5=%b(E*+$6e7h)oGA8&duMt1}HYePA`YQ?Vgz&j!zci8O`eJ3hyaRm&
+zU%?#4RG_ZflqL0Keq}CMYUFwS<$|}JC;gtmQfF}`Nt1bb`?h`Cw_$&k{wkft#pZE8
+z{K_3Wx9#4x^A*jV$@a$49lLhy+Bq?Cbo=<kzMV(+?%Q*8e0n0;HNJa#chYQ*?`-Z+
+F{|B7p()|Dc
+
+literal 0
+HcmV?d00001
+
+diff --git a/contracts/marvin/Cargo.toml b/contracts/marvin/Cargo.toml
+new file mode 100644
+index 0000000..d78dd8e
+--- /dev/null
++++ b/contracts/marvin/Cargo.toml
+@@ -0,0 +1,19 @@
++[package]
++name = "marvin"
++version = "0.1.0"
++edition = "2021"
++publish = false
++license = "MIT"
++description = "Registro de nodos y de reportes de emergencia de Marvin (Soroban)"
++
++[lib]
++crate-type = ["cdylib", "rlib"]
++doctest = false
++
++[dependencies]
++soroban-sdk = "=23.5.3"
++
++[dev-dependencies]
++soroban-sdk = { version = "=23.5.3", features = ["testutils"] }
++ed25519-dalek = { version = "2", features = ["rand_core"] }
++rand = "0.8"
+diff --git a/contracts/marvin/src/lib.rs b/contracts/marvin/src/lib.rs
+new file mode 100644
+index 0000000..dbf0e15
+--- /dev/null
++++ b/contracts/marvin/src/lib.rs
+@@ -0,0 +1,169 @@
++//! Contrato de Marvin en Soroban.
++//!
++//! Dos responsabilidades:
++//! 1. Registro de nodos autorizados: el administrador da de alta y revoca las
++//!    llaves públicas ed25519 de los nodos de campo.
++//! 2. Registro de reportes: una puerta de enlace publica el hash de un reporte
++//!    junto con la llave y la firma del nodo que lo generó. El contrato verifica
++//!    en la red que el nodo esté autorizado y que la firma sea válida, rechaza
++//!    duplicados, guarda un registro mínimo y emite un evento.
++//!
++//! En la red nunca se guardan datos del reporte: solo su hash (32 bytes).
++#![no_std]
++
++use soroban_sdk::{
++    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env,
++};
++
++/// Tiempo de vida de las entradas persistentes (en ledgers, ~5 s cada uno).
++const TTL_MINIMO: u32 = 100_000; // ~6 días
++const TTL_EXTENDIDO: u32 = 500_000; // ~29 días
++
++#[contracttype]
++#[derive(Clone)]
++enum Clave {
++    Admin,
++    Nodo(BytesN<32>),
++    Reporte(BytesN<32>),
++}
++
++/// Lo que queda en la red por cada reporte.
++#[contracttype]
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct Registro {
++    /// Llave pública ed25519 del nodo de origen.
++    pub nodo: BytesN<32>,
++    /// 1 víctima · 2 colapso · 3 ruta bloqueada · 4 zona revisada.
++    pub tipo: u32,
++    /// Hash del reporte que este corrige, si corresponde.
++    pub anula: Option<BytesN<32>>,
++    /// Ledger y hora (Unix) en que quedó registrado.
++    pub ledger: u32,
++    pub timestamp: u64,
++    /// Cuenta de la puerta de enlace que lo publicó.
++    pub puerta: Address,
++}
++
++#[contracterror]
++#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
++#[repr(u32)]
++pub enum Error {
++    NodoNoAutorizado = 1,
++    ReporteDuplicado = 2,
++    TipoInvalido = 3,
++    AnulaInexistente = 4,
++}
++
++#[contract]
++pub struct Marvin;
++
++#[contractimpl]
++impl Marvin {
++    /// Se ejecuta una sola vez, al desplegar el contrato.
++    pub fn __constructor(env: Env, admin: Address) {
++        env.storage().instance().set(&Clave::Admin, &admin);
++    }
++
++    pub fn admin(env: Env) -> Address {
++        env.storage().instance().get(&Clave::Admin).unwrap()
++    }
++
++    /// Da de alta (o reactiva) la llave de un nodo. Solo el administrador.
++    pub fn alta_nodo(env: Env, llave: BytesN<32>) {
++        Self::admin(env.clone()).require_auth();
++        Self::guardar_nodo(&env, &llave, true);
++        #[allow(deprecated)]
++        env.events().publish((symbol_short!("alta"),), llave);
++    }
++
++    /// Revoca la llave de un nodo perdido o robado. Solo el administrador.
++    pub fn revocar_nodo(env: Env, llave: BytesN<32>) {
++        Self::admin(env.clone()).require_auth();
++        Self::guardar_nodo(&env, &llave, false);
++        #[allow(deprecated)]
++        env.events().publish((symbol_short!("revoca"),), llave);
++    }
++
++    pub fn nodo_activo(env: Env, llave: BytesN<32>) -> bool {
++        env.storage()
++            .persistent()
++            .get(&Clave::Nodo(llave))
++            .unwrap_or(false)
++    }
++
++    /// Registra un reporte firmado por un nodo autorizado.
++    /// Devuelve el número de ledger en que quedó registrado.
++    pub fn registrar_reporte(
++        env: Env,
++        puerta: Address,
++        hash: BytesN<32>,
++        llave: BytesN<32>,
++        firma: BytesN<64>,
++        tipo: u32,
++        anula: Option<BytesN<32>>,
++    ) -> Result<u32, Error> {
++        puerta.require_auth();
++
++        if !(1..=4).contains(&tipo) {
++            return Err(Error::TipoInvalido);
++        }
++        if !Self::nodo_activo(env.clone(), llave.clone()) {
++            return Err(Error::NodoNoAutorizado);
++        }
++        let clave = Clave::Reporte(hash.clone());
++        if env.storage().persistent().has(&clave) {
++            return Err(Error::ReporteDuplicado);
++        }
++        if let Some(previo) = &anula {
++            if !env.storage().persistent().has(&Clave::Reporte(previo.clone())) {
++                return Err(Error::AnulaInexistente);
++            }
++        }
++
++        // La firma del nodo es sobre los 32 bytes del hash. Si no es válida,
++        // la ejecución se interrumpe y la transacción falla.
++        let mensaje: Bytes = hash.clone().into();
++        env.crypto().ed25519_verify(&llave, &mensaje, &firma);
++
++        let registro = Registro {
++            nodo: llave.clone(),
++            tipo,
++            anula: anula.clone(),
++            ledger: env.ledger().sequence(),
++            timestamp: env.ledger().timestamp(),
++            puerta,
++        };
++        env.storage().persistent().set(&clave, &registro);
++        env.storage()
++            .persistent()
++            .extend_ttl(&clave, TTL_MINIMO, TTL_EXTENDIDO);
++        env.storage()
++            .instance()
++            .extend_ttl(TTL_MINIMO, TTL_EXTENDIDO);
++
++        #[allow(deprecated)]
++        env.events()
++            .publish((symbol_short!("reporte"), tipo), (hash, llave, anula));
++
++        Ok(registro.ledger)
++    }
++
++    /// Consulta pública: cualquiera puede comprobar si un hash está registrado.
++    pub fn consultar(env: Env, hash: BytesN<32>) -> Option<Registro> {
++        env.storage().persistent().get(&Clave::Reporte(hash))
++    }
++
++    fn guardar_nodo(env: &Env, llave: &BytesN<32>, activo: bool) {
++        let clave = Clave::Nodo(llave.clone());
++        env.storage().persistent().set(&clave, &activo);
++        env.storage()
++            .persistent()
++            .extend_ttl(&clave, TTL_MINIMO, TTL_EXTENDIDO);
++        env.storage()
++            .instance()
++            .extend_ttl(TTL_MINIMO, TTL_EXTENDIDO);
++    }
++}
++
++#[cfg(test)]
++mod test;
+diff --git a/contracts/marvin/src/test.rs b/contracts/marvin/src/test.rs
+new file mode 100644
+index 0000000..1bf35e4
+--- /dev/null
++++ b/contracts/marvin/src/test.rs
+@@ -0,0 +1,187 @@
++extern crate std;
++
++use super::*;
++use ed25519_dalek::{Signer, SigningKey};
++use soroban_sdk::testutils::{Address as _, Events};
++use soroban_sdk::{BytesN, Env};
++
++struct Escenario {
++    env: Env,
++    cliente: MarvinClient<'static>,
++    puerta: Address,
++}
++
++fn escenario() -> Escenario {
++    let env = Env::default();
++    env.mock_all_auths();
++    let admin = Address::generate(&env);
++    let id = env.register(Marvin, (admin.clone(),));
++    let cliente = MarvinClient::new(&env, &id);
++    let puerta = Address::generate(&env);
++    Escenario { env, cliente, puerta }
++}
++
++fn nodo(semilla: u8) -> SigningKey {
++    SigningKey::from_bytes(&[semilla; 32])
++}
++
++fn llave(env: &Env, n: &SigningKey) -> BytesN<32> {
++    BytesN::from_array(env, &n.verifying_key().to_bytes())
++}
++
++fn firmado(env: &Env, n: &SigningKey, contenido: u8) -> (BytesN<32>, BytesN<64>) {
++    let hash = [contenido; 32];
++    let firma = n.sign(&hash).to_bytes();
++    (BytesN::from_array(env, &hash), BytesN::from_array(env, &firma))
++}
++
++#[test]
++fn registra_un_reporte_valido_y_se_puede_consultar() {
++    let e = escenario();
++    let n = nodo(1);
++    e.cliente.alta_nodo(&llave(&e.env, &n));
++    let (hash, firma) = firmado(&e.env, &n, 7);
++
++    let ledger = e
++        .cliente
++        .registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &1, &None);
++    assert_eq!(e.env.events().all().len(), 1);
++
++    let r = e.cliente.consultar(&hash).unwrap();
++    assert_eq!(r.ledger, ledger);
++    assert_eq!(r.tipo, 1);
++    assert_eq!(r.nodo, llave(&e.env, &n));
++    assert_eq!(r.puerta, e.puerta);
++}
++
++#[test]
++fn rechaza_un_nodo_no_registrado() {
++    let e = escenario();
++    let n = nodo(2);
++    let (hash, firma) = firmado(&e.env, &n, 1);
++    let r = e
++        .cliente
++        .try_registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &2, &None);
++    assert_eq!(r, Err(Ok(Error::NodoNoAutorizado)));
++}
++
++#[test]
++fn rechaza_un_nodo_revocado() {
++    let e = escenario();
++    let n = nodo(3);
++    e.cliente.alta_nodo(&llave(&e.env, &n));
++    assert!(e.cliente.nodo_activo(&llave(&e.env, &n)));
++    e.cliente.revocar_nodo(&llave(&e.env, &n));
++    assert!(!e.cliente.nodo_activo(&llave(&e.env, &n)));
++    let (hash, firma) = firmado(&e.env, &n, 1);
++    let r = e
++        .cliente
++        .try_registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &3, &None);
++    assert_eq!(r, Err(Ok(Error::NodoNoAutorizado)));
++}
++
++#[test]
++fn rechaza_duplicados() {
++    let e = escenario();
++    let n = nodo(4);
++    e.cliente.alta_nodo(&llave(&e.env, &n));
++    let (hash, firma) = firmado(&e.env, &n, 9);
++    e.cliente
++        .registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &4, &None);
++    let r = e
++        .cliente
++        .try_registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &4, &None);
++    assert_eq!(r, Err(Ok(Error::ReporteDuplicado)));
++}
++
++#[test]
++fn rechaza_tipo_invalido() {
++    let e = escenario();
++    let n = nodo(5);
++    e.cliente.alta_nodo(&llave(&e.env, &n));
++    let (hash, firma) = firmado(&e.env, &n, 9);
++    let r = e
++        .cliente
++        .try_registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &9, &None);
++    assert_eq!(r, Err(Ok(Error::TipoInvalido)));
++}
++
++#[test]
++fn una_correccion_debe_apuntar_a_un_reporte_registrado() {
++    let e = escenario();
++    let n = nodo(6);
++    e.cliente.alta_nodo(&llave(&e.env, &n));
++    let (original, f1) = firmado(&e.env, &n, 1);
++    let (correccion, f2) = firmado(&e.env, &n, 2);
++    let (fantasma, _) = firmado(&e.env, &n, 3);
++
++    let r = e.cliente.try_registrar_reporte(
++        &e.puerta, &correccion, &llave(&e.env, &n), &f2, &1, &Some(fantasma),
++    );
++    assert_eq!(r, Err(Ok(Error::AnulaInexistente)));
++
++    e.cliente
++        .registrar_reporte(&e.puerta, &original, &llave(&e.env, &n), &f1, &1, &None);
++    e.cliente.registrar_reporte(
++        &e.puerta, &correccion, &llave(&e.env, &n), &f2, &1, &Some(original.clone()),
++    );
++    assert_eq!(e.cliente.consultar(&correccion).unwrap().anula, Some(original));
++}
++
++#[test]
++#[should_panic]
++fn rechaza_una_firma_falsa() {
++    let e = escenario();
++    let n = nodo(7);
++    let impostor = nodo(8);
++    e.cliente.alta_nodo(&llave(&e.env, &n));
++    // El impostor firma, pero se presenta con la llave del nodo autorizado.
++    let (hash, firma) = firmado(&e.env, &impostor, 5);
++    e.cliente
++        .registrar_reporte(&e.puerta, &hash, &llave(&e.env, &n), &firma, &1, &None);
++}
++
++#[test]
++#[should_panic]
++fn solo_el_admin_da_de_alta_nodos() {
++    let env = Env::default();
++    let admin = Address::generate(&env);
++    let id = env.register(Marvin, (admin,));
++    let cliente = MarvinClient::new(&env, &id);
++    // Sin autorización del admin.
++    cliente.alta_nodo(&BytesN::from_array(&env, &[1; 32]));
++}
++
++#[test]
++fn consultar_un_hash_desconocido_devuelve_none() {
++    let e = escenario();
++    assert_eq!(e.cliente.consultar(&BytesN::from_array(&e.env, &[0; 32])), None);
++}
++
++/// Carga el .wasm compilado (si existe) en el host de Soroban y repite el flujo
++/// principal, para comprobar que el binario que se despliega es válido.
++#[test]
++fn el_wasm_compilado_funciona_en_el_host() {
++    let ruta = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/wasm32v1-none/release/marvin.wasm");
++    let Ok(wasm) = std::fs::read(ruta) else {
++        std::println!("(sin wasm compilado, se omite)");
++        return;
++    };
++    let env = Env::default();
++    env.mock_all_auths();
++    let admin = Address::generate(&env);
++    let id = env.register(wasm.as_slice(), (admin.clone(),));
++    let cliente = MarvinClient::new(&env, &id);
++    assert_eq!(cliente.admin(), admin);
++    let n = nodo(9);
++    cliente.alta_nodo(&llave(&env, &n));
++    let (hash, firma) = firmado(&env, &n, 4);
++    let puerta = Address::generate(&env);
++    cliente.registrar_reporte(&puerta, &hash, &llave(&env, &n), &firma, &2, &None);
++    assert_eq!(cliente.consultar(&hash).unwrap().tipo, 2);
++    let (h2, _) = firmado(&env, &n, 5);
++    let (_, firma_mala) = firmado(&env, &nodo(10), 5);
++    assert!(cliente
++        .try_registrar_reporte(&puerta, &h2, &llave(&env, &n), &firma_mala, &1, &None)
++        .is_err());
++}
+diff --git a/docs/semana4/Despliegue.md b/docs/semana4/Despliegue.md
+new file mode 100644
+index 0000000..35a4f1b
+--- /dev/null
++++ b/docs/semana4/Despliegue.md
+@@ -0,0 +1,32 @@
++# Evidencia de despliegue en Stellar Testnet
++
++> Generado automáticamente por `frontend/scripts/despliegue.ts` el 2026-10-19T02:15:07.385Z.
++
++| Dato | Valor |
++| --- | --- |
++| Red | Stellar testnet (https://soroban-testnet.stellar.org) |
++| Contrato | [`CD5LRX24DHEDDHS47TN7IFBD4EMAZSLDTABA7Z7UPDYN3I7ZGI5RRGDR`](https://stellar.expert/explorer/testnet/contract/CD5LRX24DHEDDHS47TN7IFBD4EMAZSLDTABA7Z7UPDYN3I7ZGI5RRGDR) |
++| Cuenta administradora | [`GCASTATANR2VXZHM5J2BQQ6HRFKBEJ2RQPP2TWAWV3QL2QAEFCWRBSQT`](https://stellar.expert/explorer/testnet/account/GCASTATANR2VXZHM5J2BQQ6HRFKBEJ2RQPP2TWAWV3QL2QAEFCWRBSQT) |
++| WASM (SHA-256) | `c3dbb3f3a1b5a5ef1eb552cb65aa9644df955039f61c0d874d9219749c9fc3ed` |
++| Subida del WASM | [e70caf7ed6d54e0c…](https://stellar.expert/explorer/testnet/tx/e70caf7ed6d54e0cc92aab26266b7da75065b0925ea4fc7e4cda1b32a14ad811) |
++| Creación del contrato | [c85c0b190a7f374c…](https://stellar.expert/explorer/testnet/tx/c85c0b190a7f374c7ef4a32d6910dac6d5c556c4fd15522166e4393f60f5fa7c) |
++
++## Nodos registrados
++
++| Nodo | Brigada | Llave pública | Transacción |
++| --- | --- | --- | --- |
++| N1 | Bomberos Norte | `bfaa2b910f186630…` | [9b2a460a92…](https://stellar.expert/explorer/testnet/tx/9b2a460a9207f3b943b94770a07049bb25f1b13d2e13a5b59d1d779c49d6f72c) |
++| N2 | Protección Civil Municipal | `3a52252f3fa0c811…` | [0d9b7821e8…](https://stellar.expert/explorer/testnet/tx/0d9b7821e88e73771878a7189c0d60b3021cb34725b284de26f7d5c4028d4b3d) |
++| N3 | Brigada Voluntaria Centro | `779ead0bb911d394…` | [5fefd7b293…](https://stellar.expert/explorer/testnet/tx/5fefd7b2939842043b0ff128ece04dc99640d333721d824affdbd2f7d93a53dc) |
++| N4 | Cruz Roja | `017ace7051c695c2…` | [39aff35ba8…](https://stellar.expert/explorer/testnet/tx/39aff35ba80946cf23e56a13769a9c00ce59aebe461d5f8403cd57bb9ce7eaf2) |
++| N5 | Búsqueda y Rescate Urbano | `6f7a05120528f8d5…` | [d51b17261a…](https://stellar.expert/explorer/testnet/tx/d51b17261a94eee9c63e5bab0657e60df9767e22d2aae526c4bcb904a18a1be3) |
++
++## Pruebas en la red
++
++| # | Prueba | Resultado |
++| :-: | --- | --- |
++| 1 | La puerta de enlace publica un reporte firmado por N1 | ✅ Registrado en el ledger 5270504 · [ver transacción](https://stellar.expert/explorer/testnet/tx/7b91f8fde0c74f4d16a472befc6914073c628bd4f99a321aea01ab8adbab62d6) |
++| 2 | Consulta pública del hash, sin firmar | ✅ Devuelve ledger 5270504 y la llave de N1 |
++| 3 | Reporte de un nodo no registrado | ✅ Rechazado: Nodo no autorizado en el contrato |
++| 4 | El mismo reporte publicado dos veces | ✅ Rechazado: El reporte ya estaba registrado |
++| 5 | Firma falsa usando la llave de N2 | ✅ Rechazado por la verificación ed25519 del contrato |
+diff --git a/docs/semana4/Documentacion.md b/docs/semana4/Documentacion.md
+new file mode 100644
+index 0000000..36761e9
+--- /dev/null
++++ b/docs/semana4/Documentacion.md
+@@ -0,0 +1,102 @@
++# Documentación — Semana 4: Validated MVP
++
++**Proyecto:** Marvin — Red de reportes de emergencia offline-first
++**Contrato en Testnet:** [`CD5LRX24DHEDDHS47TN7IFBD4EMAZSLDTABA7Z7UPDYN3I7ZGI5RRGDR`](https://stellar.expert/explorer/testnet/contract/CD5LRX24DHEDDHS47TN7IFBD4EMAZSLDTABA7Z7UPDYN3I7ZGI5RRGDR)
++**Evidencia del despliegue y de las pruebas en la red:** [Despliegue.md](Despliegue.md)
++
++---
++
++## 1. Qué cambió desde la semana 3
++
++En la semana 3 la publicación en Stellar estaba simulada. Esta semana cumplimos la decisión técnica que habíamos tomado (opción A, contrato propio):
++
++| Pieza | Semana 3 | Semana 4 |
++| --- | --- | --- |
++| Contrato Soroban | Solo diseñado | Escrito en Rust, con 10 pruebas, compilado y desplegado en Testnet (`contracts/`) |
++| Puerta de enlace | Transacciones ficticias | Invoca `registrar_reporte` en el contrato real y muestra el enlace de cada transacción |
++| Registro público | Buscaba en la memoria del navegador | Le pregunta al contrato con `consultar(hash)` |
++| Nodos N1–N5 | Llaves aleatorias en cada demo | Llaves fijas de demo, registradas en el contrato |
++| Malla entre nodos | Simulada | Sigue simulada (es hardware; ver sección 6) |
++
++## 2. El contrato
++
++Código: [`contracts/marvin/src/lib.rs`](../../contracts/marvin/src/lib.rs) · pruebas: [`test.rs`](../../contracts/marvin/src/test.rs) · binario desplegado: `contracts/dist/marvin.wasm` (11 KB).
++
++| Función | Quién la llama | Qué hace |
++| --- | --- | --- |
++| `__constructor(admin)` | Al desplegar | Guarda la cuenta administradora. |
++| `alta_nodo(llave)` / `revocar_nodo(llave)` | Administrador (firma obligatoria) | Autoriza o revoca la llave ed25519 de un nodo de campo. |
++| `registrar_reporte(puerta, hash, llave, firma, tipo, anula)` | Puerta de enlace (firma obligatoria) | Comprueba que el nodo esté autorizado, que el tipo sea válido, que el hash no esté repetido y que, si es una corrección, el reporte corregido exista; **verifica la firma ed25519 del nodo en la red**; guarda un registro mínimo y emite un evento. |
++| `consultar(hash)` | Cualquiera, sin firmar | Devuelve nodo, tipo, reporte corregido, ledger y hora, o nada si el hash no existe. |
++| `nodo_activo(llave)` | Cualquiera | Indica si una llave está autorizada. |
++
++**Errores:** `1` nodo no autorizado · `2` reporte duplicado · `3` tipo inválido · `4` la corrección apunta a un reporte no registrado. Una firma falsa interrumpe la ejecución y la transacción falla.
++
++**Qué queda en la red:** solo el hash del reporte (32 bytes), la llave del nodo, el tipo y la hora. La zona, la nota y los datos personales nunca salen de la red local.
++
++**Pruebas automáticas** (`cargo test`): reporte válido y consulta, nodo no registrado, nodo revocado, duplicado, tipo inválido, correcciones, firma falsa, alta sin permiso del administrador, hash desconocido y una prueba que carga el `.wasm` compilado en el host de Soroban y repite el flujo. Las 10 pasan.
++
++## 3. Integración con el front
++
++- `frontend/src/lib/stellar.ts` concentra todo lo que habla con Stellar (`@stellar/stellar-sdk` y Stellar RPC). Lo usan el front y el script de despliegue, así que el código que se probó en la red es el mismo que corre en la interfaz.
++- `frontend/src/contrato.json` guarda el ID del contrato. Si está vacío, el front vuelve al modo simulado de la semana 3.
++- **Puerta de enlace:** al activar un enlace (celular o satelital), el navegador crea su propia cuenta de Testnet, la fondea con Friendbot y publica la cola por prioridad, una transacción por reporte. Cada fila publicada enlaza a la transacción en StellarExpert. Si el contrato rechaza un reporte, aparece en «Rechazados» con el motivo.
++- **Registro público:** «Verificar» recalcula el hash del reporte original y se lo pregunta al contrato. Si alguien cambió un dato, el hash ya no existe en la red.
++- **Por qué no usamos una wallet como Freighter:** en Marvin quien firma no es una persona sino un dispositivo. Los nodos firman los reportes con su propia llave y la puerta de enlace paga las comisiones con su cuenta. Una wallet de navegador agregaría un clic de confirmación por cada reporte, que es justo lo que no queremos en una emergencia.
++
++**Para probarlo (2 minutos):**
++
++1. `cd frontend && npm install && npm run dev`.
++2. En **Puerta de enlace**, elegir **Celular**: los seis reportes de ejemplo se publican en Testnet, primero las víctimas. Abrir cualquier enlace ↗ para ver la transacción.
++3. En **Nodo de campo**, enviar un reporte nuevo y ver cómo llega y se publica.
++4. En **Administración**, dar de alta un nodo nuevo y enviar un reporte desde él: la malla lo deja pasar, pero el contrato lo rechaza con «Nodo no autorizado».
++5. En **Registro público**, verificar un reporte y luego probar con uno alterado.
++
++## 4. Evidencia en Testnet
++
++El despliegue y cinco pruebas contra la red real están documentados con enlaces a cada transacción en [Despliegue.md](Despliegue.md):
++
++1. Un reporte firmado por N1 queda registrado (ledger 5.270.504).
++2. Cualquiera lo consulta sin firmar nada.
++3. Un nodo no registrado es rechazado.
++4. El mismo reporte no puede registrarse dos veces.
++5. Una firma falsificada con la llave de N2 es rechazada por la verificación ed25519 del contrato.
++
++## 5. Validación del producto
++
++### Hipótesis críticas
++
++| # | Hipótesis | Cómo la validamos | Criterio de éxito |
++| :-: | --- | --- | --- |
++| H-A | Un brigadista puede enviar un reporte bajo presión sin capacitación previa. | Prueba de usabilidad: «reportá dos personas atrapadas en la zona C3», sin explicación previa. | 4 de 5 personas lo logran en menos de 30 segundos. |
++| H-B | Un coordinador entiende el panorama en el centro de mando sin ayuda. | Pedir que diga qué zona atender primero y por qué. | 4 de 5 responden con la zona de mayor prioridad. |
++| H-C | Una organización externa confía en el registro público. | Mostrar la verificación de un reporte íntegro y de uno alterado y preguntar si lo usaría para auditar. | 3 de 5 dicen que sí y entienden la diferencia. |
++| H-D | El alcance radio entre nodos es suficiente entre edificios. | Prueba de campo con dos placas (ver sección 6). | Al menos 500 m entre nodos en zona urbana. |
++
++### Resultados
++
++_Pendiente:_ las pruebas de usabilidad (H-A a H-C) se harán con 5 personas antes del cierre del programa, y los resultados se registrarán en esta sección. H-D requiere el hardware de la sección 6.
++
++## 6. Revisión de riesgos y cambios priorizados
++
++Revisando el diseño encontramos que el riesgo más grande no está en la blockchain sino en la radio:
++
++| Riesgo | Evaluación | Cambio priorizado |
++| --- | --- | --- |
++| **Alcance de ESP-NOW** | Unos 350 m en campo abierto; entre escombros, concreto y metal puede bajar a decenas de metros. Exigiría demasiados nodos. | Pasar a **LoRa (915 MHz)** con placas ESP32+LoRa (por ejemplo Heltec V3 o LilyGO T-Beam), de 1 a 3 km en ciudad, y evaluar montarse sobre **Meshtastic**. La firma ed25519 y el contrato no cambian. |
++| **Personas aisladas** | El diseño cubre a rescatistas, no a civiles. | Nodos de relevo fijos con panel solar en zonas de riesgo y una red WiFi local del propio nodo para reportar desde cualquier celular. |
++| **La puerta de enlace omite reportes** | Las firmas impiden falsificar, pero no impiden callar. | Varias puertas de enlace de distintas instituciones publicando en paralelo; el contrato ya descarta duplicados. |
++| **Revocar sin internet** | Un nodo robado sigue activo hasta que haya enlace. | Propagar la lista de revocaciones también por la malla. |
++| **Llaves de demo** | Las llaves de N1–N5 se derivan de una semilla pública: sirven solo para la demo en Testnet. | En producción, cada ESP32 genera su llave y nunca la expone. |
++
++## 7. Participación del equipo
++
++| Integrante | GitHub | Aporte en este entregable |
++| --- | --- | --- |
++| Franco Alejandro Mamani | [`migux97`](https://github.com/migux97) | Contrato Soroban y pruebas, despliegue en Testnet, integración con el front y documentación. |
++
++## 8. Siguiente paso
++
++1. Hacer las pruebas de usabilidad y completar la sección 5.
++2. Grabar el video de demostración (máximo 3 minutos) y armar la hoja de ruta de 30 días para el Demo Package.
++3. Comprar dos placas ESP32+LoRa y medir el alcance real entre edificios.
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index f8a4b37..82e68c0 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -1,21 +1,23 @@
+ {
+-  "name": "frontend",
++  "name": "marvin-frontend",
+   "version": "0.0.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+-      "name": "frontend",
++      "name": "marvin-frontend",
+       "version": "0.0.0",
+       "dependencies": {
+         "@noble/ed25519": "^2.3.0",
+         "@noble/hashes": "^1.8.0",
++        "@stellar/stellar-sdk": "^17.2.1",
+         "react": "^19.1.0",
+         "react-dom": "^19.1.0",
+         "react-router-dom": "^6.30.6"
+       },
+       "devDependencies": {
+         "@eslint/js": "^9.25.0",
++        "@types/node": "^22.20.5",
+         "@types/react": "^19.1.2",
+         "@types/react-dom": "^19.1.2",
+         "@vitejs/plugin-react": "^4.4.1",
+@@ -23,6 +25,7 @@
+         "eslint-plugin-react-hooks": "^5.2.0",
+         "eslint-plugin-react-refresh": "^0.4.19",
+         "globals": "^16.0.0",
++        "tsx": "^4.23.15",
+         "typescript": "~5.8.3",
+         "typescript-eslint": "^8.30.1",
+         "vite": "^6.3.5"
+@@ -909,6 +912,23 @@
+         "node": "^18.18.0 || ^20.9.0 || >=21.1.0"
+       }
+     },
++    "node_modules/@exodus/bytes": {
++      "version": "1.16.0",
++      "resolved": "https://registry.npmjs.org/@exodus/bytes/-/bytes-1.16.0.tgz",
++      "integrity": "sha512-IcpW84uEn3N7ETtNZMlxKhfl6Pec8rUNGOTBtWbK1FKhJxIFAptZyVrvVRVBimAJxJCgc3PxepxkdWWG4DVzfA==",
++      "license": "MIT",
++      "engines": {
++        "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
++      },
++      "peerDependencies": {
++        "@noble/hashes": "^1.8.0 || ^2.0.0"
++      },
++      "peerDependenciesMeta": {
++        "@noble/hashes": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/@humanfs/core": {
+       "version": "0.19.2",
+       "resolved": "https://registry.npmjs.org/@humanfs/core/-/core-0.19.2.tgz",
+@@ -1429,6 +1449,65 @@
+         "win32"
+       ]
+     },
++    "node_modules/@stellar/js-xdr": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/@stellar/js-xdr/-/js-xdr-5.0.0.tgz",
++      "integrity": "sha512-HBDNKnxr+ecdaEmbZ0mcKkirOF8tXXEbWSw34P3wT40Tn3g+u+cCH17xAWZymzscq8cojHB8340pR8QNVaD32w==",
++      "license": "Apache-2.0",
++      "engines": {
++        "node": ">=22.0.0",
++        "pnpm": ">=10.0.0"
++      }
++    },
++    "node_modules/@stellar/stellar-sdk": {
++      "version": "17.2.1",
++      "resolved": "https://registry.npmjs.org/@stellar/stellar-sdk/-/stellar-sdk-17.2.1.tgz",
++      "integrity": "sha512-kIyfnZ2zCOqV8SUJcsk9buBOvhH1wsLU7KAzqAJyY7AgmD+KdvLTMpI1gcYdhGSakuDG5s6xSO4EN9HZTxpm8g==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "@exodus/bytes": "^1.15.1",
++        "@noble/ed25519": "^3.1.0",
++        "@noble/hashes": "^2.2.0",
++        "@stellar/js-xdr": "^5.0.0",
++        "@types/json-schema": "^7.0.15",
++        "axios": "1.20.0",
++        "bignumber.js": "^11.1.4",
++        "commander": "^14.0.3",
++        "eventsource": "^4.1.0",
++        "feaxios": "^0.0.23",
++        "smol-toml": "^1.6.1",
++        "uint8array-extras": "^1.5.0"
++      },
++      "bin": {
++        "stellar-contract-bindings-typescript": "bin/stellar-contract-bindings-typescript",
++        "stellar-js": "bin/stellar-js",
++        "stellar-sdk": "bin/stellar-js"
++      },
++      "engines": {
++        "node": ">=22.12.0"
++      }
++    },
++    "node_modules/@stellar/stellar-sdk/node_modules/@noble/ed25519": {
++      "version": "3.2.0",
++      "resolved": "https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.2.0.tgz",
++      "integrity": "sha512-criDgRlnUA09hchYrTy/JUWPIEap5rZxQe6wDWzRx51oWWpDRcUpuNzlgPxDJaOK6AsW9c0wKcj3rKRv6t+bPQ==",
++      "license": "MIT",
++      "funding": {
++        "url": "https://paulmillr.com/funding/"
++      }
++    },
++    "node_modules/@stellar/stellar-sdk/node_modules/@noble/hashes": {
++      "version": "2.4.0",
++      "resolved": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.4.0.tgz",
++      "integrity": "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 20.19.0"
++      },
++      "funding": {
++        "url": "https://paulmillr.com/funding/"
++      }
++    },
+     "node_modules/@types/babel__core": {
+       "version": "7.20.5",
+       "resolved": "https://registry.npmjs.org/@types/babel__core/-/babel__core-7.20.5.tgz",
+@@ -1485,9 +1564,18 @@
+       "version": "7.0.15",
+       "resolved": "https://registry.npmjs.org/@types/json-schema/-/json-schema-7.0.15.tgz",
+       "integrity": "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==",
+-      "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/@types/node": {
++      "version": "22.20.5",
++      "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.5.tgz",
++      "integrity": "sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "undici-types": "~6.21.0"
++      }
++    },
+     "node_modules/@types/react": {
+       "version": "19.3.0",
+       "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+@@ -1847,6 +1935,18 @@
+         "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0"
+       }
+     },
++    "node_modules/agent-base": {
++      "version": "6.0.2",
++      "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
++      "integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==",
++      "license": "MIT",
++      "dependencies": {
++        "debug": "4"
++      },
++      "engines": {
++        "node": ">= 6.0.0"
++      }
++    },
+     "node_modules/ajv": {
+       "version": "6.15.0",
+       "resolved": "https://registry.npmjs.org/ajv/-/ajv-6.15.0.tgz",
+@@ -1887,6 +1987,24 @@
+       "dev": true,
+       "license": "Python-2.0"
+     },
++    "node_modules/asynckit": {
++      "version": "0.4.0",
++      "resolved": "https://registry.npmjs.org/asynckit/-/asynckit-0.4.0.tgz",
++      "integrity": "sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==",
++      "license": "MIT"
++    },
++    "node_modules/axios": {
++      "version": "1.20.0",
++      "resolved": "https://registry.npmjs.org/axios/-/axios-1.20.0.tgz",
++      "integrity": "sha512-r8aOh8j9cGKpgQAqpzrUHnSIc6a59Y3Xf/cv8sy1DrHCkZHzQGEuoq1tARk6qSyDdtQGSDgpb9kFlruzPvrgwg==",
++      "license": "MIT",
++      "dependencies": {
++        "follow-redirects": "^1.16.0",
++        "form-data": "^4.0.6",
++        "https-proxy-agent": "^5.0.1",
++        "proxy-from-env": "^2.1.0"
++      }
++    },
+     "node_modules/balanced-match": {
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/balanced-match/-/balanced-match-1.0.2.tgz",
+@@ -1907,6 +2025,12 @@
+         "node": ">=6.0.0"
+       }
+     },
++    "node_modules/bignumber.js": {
++      "version": "11.1.5",
++      "resolved": "https://registry.npmjs.org/bignumber.js/-/bignumber.js-11.1.5.tgz",
++      "integrity": "sha512-6WmzCNtUnfKpbozq+hOgWaZMMzORmYBwF1xZScyoIX3QRYWeKTtxxwDOW5tIz7C9BdjkIYHGTcelCLkXg0mndw==",
++      "license": "MIT"
++    },
+     "node_modules/brace-expansion": {
+       "version": "1.1.21",
+       "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.21.tgz",
+@@ -1952,6 +2076,19 @@
+         "node": "^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7"
+       }
+     },
++    "node_modules/call-bind-apply-helpers": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
++      "integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0",
++        "function-bind": "^1.1.2"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
+     "node_modules/callsites": {
+       "version": "3.1.0",
+       "resolved": "https://registry.npmjs.org/callsites/-/callsites-3.1.0.tgz",
+@@ -2020,6 +2157,27 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/combined-stream": {
++      "version": "1.0.8",
++      "resolved": "https://registry.npmjs.org/combined-stream/-/combined-stream-1.0.8.tgz",
++      "integrity": "sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==",
++      "license": "MIT",
++      "dependencies": {
++        "delayed-stream": "~1.0.0"
++      },
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/commander": {
++      "version": "14.0.3",
++      "resolved": "https://registry.npmjs.org/commander/-/commander-14.0.3.tgz",
++      "integrity": "sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=20"
++      }
++    },
+     "node_modules/concat-map": {
+       "version": "0.0.1",
+       "resolved": "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz",
+@@ -2060,7 +2218,6 @@
+       "version": "4.4.3",
+       "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
+       "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "ms": "^2.1.3"
+@@ -2081,6 +2238,29 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/delayed-stream": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/delayed-stream/-/delayed-stream-1.0.0.tgz",
++      "integrity": "sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.4.0"
++      }
++    },
++    "node_modules/dunder-proto": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
++      "integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bind-apply-helpers": "^1.0.1",
++        "es-errors": "^1.3.0",
++        "gopd": "^1.2.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
+     "node_modules/electron-to-chromium": {
+       "version": "1.5.452",
+       "resolved": "https://registry.npmjs.org/electron-to-chromium/-/electron-to-chromium-1.5.452.tgz",
+@@ -2088,6 +2268,51 @@
+       "dev": true,
+       "license": "ISC"
+     },
++    "node_modules/es-define-property": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
++      "integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/es-errors": {
++      "version": "1.3.0",
++      "resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
++      "integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/es-object-atoms": {
++      "version": "1.1.2",
++      "resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.2.tgz",
++      "integrity": "sha512-HWcBoN6NileqtSydK2FqHbS/LoDd2pqrnQHLyJzBj4kOp/ky2MWMN694xOfkK8/SnUsW2DH7EfyVlydKCsm1Zw==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/es-set-tostringtag": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/es-set-tostringtag/-/es-set-tostringtag-2.1.0.tgz",
++      "integrity": "sha512-j6vWzfrGVfyXxge+O0x5sh6cvxAog0a/4Rdd2K36zCMV5eJ+/+tOAngRO8cODMNWbVRdVlmGZQL2YS3yR8bIUA==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0",
++        "get-intrinsic": "^1.2.6",
++        "has-tostringtag": "^1.0.2",
++        "hasown": "^2.0.2"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
+     "node_modules/esbuild": {
+       "version": "0.25.12",
+       "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.25.12.tgz",
+@@ -2331,6 +2556,27 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/eventsource": {
++      "version": "4.1.1",
++      "resolved": "https://registry.npmjs.org/eventsource/-/eventsource-4.1.1.tgz",
++      "integrity": "sha512-D6bTRWh6KahHTK/m4WnjPQyEinNPf9eFLEZSEoj7d6fTibspnAVYfzHvirL7u/aoX5d9YYfIkBVAhmigUELk9w==",
++      "license": "MIT",
++      "dependencies": {
++        "eventsource-parser": "^3.0.1"
++      },
++      "engines": {
++        "node": ">=20.0.0"
++      }
++    },
++    "node_modules/eventsource-parser": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/eventsource-parser/-/eventsource-parser-3.1.1.tgz",
++      "integrity": "sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18.0.0"
++      }
++    },
+     "node_modules/fast-deep-equal": {
+       "version": "3.1.3",
+       "resolved": "https://registry.npmjs.org/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz",
+@@ -2370,6 +2616,15 @@
+         }
+       }
+     },
++    "node_modules/feaxios": {
++      "version": "0.0.23",
++      "resolved": "https://registry.npmjs.org/feaxios/-/feaxios-0.0.23.tgz",
++      "integrity": "sha512-eghR0A21fvbkcQBgZuMfQhrXxJzC0GNUGC9fXhBge33D+mFDTwl0aJ35zoQQn575BhyjQitRc5N4f+L4cP708g==",
++      "license": "MIT",
++      "dependencies": {
++        "is-retry-allowed": "^3.0.0"
++      }
++    },
+     "node_modules/file-entry-cache": {
+       "version": "8.0.0",
+       "resolved": "https://registry.npmjs.org/file-entry-cache/-/file-entry-cache-8.0.0.tgz",
+@@ -2421,6 +2676,42 @@
+       "dev": true,
+       "license": "ISC"
+     },
++    "node_modules/follow-redirects": {
++      "version": "1.16.1",
++      "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.1.tgz",
++      "integrity": "sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==",
++      "funding": [
++        {
++          "type": "individual",
++          "url": "https://github.com/sponsors/RubenVerborgh"
++        }
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=4.0"
++      },
++      "peerDependenciesMeta": {
++        "debug": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/form-data": {
++      "version": "4.0.6",
++      "resolved": "https://registry.npmjs.org/form-data/-/form-data-4.0.6.tgz",
++      "integrity": "sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==",
++      "license": "MIT",
++      "dependencies": {
++        "asynckit": "^0.4.0",
++        "combined-stream": "^1.0.8",
++        "es-set-tostringtag": "^2.1.0",
++        "hasown": "^2.0.4",
++        "mime-types": "^2.1.35"
++      },
++      "engines": {
++        "node": ">= 6"
++      }
++    },
+     "node_modules/fsevents": {
+       "version": "2.3.3",
+       "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
+@@ -2436,6 +2727,15 @@
+         "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
+       }
+     },
++    "node_modules/function-bind": {
++      "version": "1.1.2",
++      "resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
++      "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==",
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
+     "node_modules/gensync": {
+       "version": "1.0.0-beta.2",
+       "resolved": "https://registry.npmjs.org/gensync/-/gensync-1.0.0-beta.2.tgz",
+@@ -2446,6 +2746,43 @@
+         "node": ">=6.9.0"
+       }
+     },
++    "node_modules/get-intrinsic": {
++      "version": "1.3.0",
++      "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
++      "integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bind-apply-helpers": "^1.0.2",
++        "es-define-property": "^1.0.1",
++        "es-errors": "^1.3.0",
++        "es-object-atoms": "^1.1.1",
++        "function-bind": "^1.1.2",
++        "get-proto": "^1.0.1",
++        "gopd": "^1.2.0",
++        "has-symbols": "^1.1.0",
++        "hasown": "^2.0.2",
++        "math-intrinsics": "^1.1.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/get-proto": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
++      "integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
++      "license": "MIT",
++      "dependencies": {
++        "dunder-proto": "^1.0.1",
++        "es-object-atoms": "^1.0.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
+     "node_modules/glob-parent": {
+       "version": "6.0.2",
+       "resolved": "https://registry.npmjs.org/glob-parent/-/glob-parent-6.0.2.tgz",
+@@ -2472,6 +2809,18 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
++    "node_modules/gopd": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
++      "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
+     "node_modules/has-flag": {
+       "version": "4.0.0",
+       "resolved": "https://registry.npmjs.org/has-flag/-/has-flag-4.0.0.tgz",
+@@ -2482,6 +2831,58 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/has-symbols": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
++      "integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/has-tostringtag": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/has-tostringtag/-/has-tostringtag-1.0.2.tgz",
++      "integrity": "sha512-NqADB8VjPFLM2V0VvHUewwwsw0ZWBaIdgo+ieHtK3hasLz4qeCRjYcqfB6AQrBggRKppKF8L52/VqdVsO47Dlw==",
++      "license": "MIT",
++      "dependencies": {
++        "has-symbols": "^1.0.3"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/hasown": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.4.tgz",
++      "integrity": "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==",
++      "license": "MIT",
++      "dependencies": {
++        "function-bind": "^1.1.2"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/https-proxy-agent": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
++      "integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==",
++      "license": "MIT",
++      "dependencies": {
++        "agent-base": "6",
++        "debug": "4"
++      },
++      "engines": {
++        "node": ">= 6"
++      }
++    },
+     "node_modules/ignore": {
+       "version": "5.3.2",
+       "resolved": "https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz",
+@@ -2542,6 +2943,18 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/is-retry-allowed": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/is-retry-allowed/-/is-retry-allowed-3.0.0.tgz",
++      "integrity": "sha512-9xH0xvoggby+u0uGF7cZXdrutWiBiaFG8ZT4YFPXL8NzkyAwX3AKGLeFQLvzDpM430+nDFBZ1LHkie/8ocL06A==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
+     "node_modules/isexe": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/isexe/-/isexe-2.0.0.tgz",
+@@ -2683,6 +3096,36 @@
+         "yallist": "^3.0.2"
+       }
+     },
++    "node_modules/math-intrinsics": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
++      "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/mime-db": {
++      "version": "1.52.0",
++      "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
++      "integrity": "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/mime-types": {
++      "version": "2.1.35",
++      "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
++      "integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
++      "license": "MIT",
++      "dependencies": {
++        "mime-db": "1.52.0"
++      },
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
+     "node_modules/minimatch": {
+       "version": "3.1.5",
+       "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz",
+@@ -2700,7 +3143,6 @@
+       "version": "2.1.3",
+       "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+-      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/nanoid": {
+@@ -2881,6 +3323,15 @@
+         "node": ">= 0.8.0"
+       }
+     },
++    "node_modules/proxy-from-env": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/proxy-from-env/-/proxy-from-env-2.1.0.tgz",
++      "integrity": "sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=10"
++      }
++    },
+     "node_modules/punycode": {
+       "version": "2.3.1",
+       "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
+@@ -3049,6 +3500,18 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/smol-toml": {
++      "version": "1.9.1",
++      "resolved": "https://registry.npmjs.org/smol-toml/-/smol-toml-1.9.1.tgz",
++      "integrity": "sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==",
++      "license": "BSD-3-Clause",
++      "engines": {
++        "node": ">= 18"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/cyyynthia"
++      }
++    },
+     "node_modules/source-map-js": {
+       "version": "1.2.2",
+       "resolved": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.2.tgz",
+@@ -3115,35 +3578,538 @@
+         "typescript": ">=4.8.4"
+       }
+     },
+-    "node_modules/type-check": {
+-      "version": "0.4.0",
+-      "resolved": "https://registry.npmjs.org/type-check/-/type-check-0.4.0.tgz",
+-      "integrity": "sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==",
++    "node_modules/tsx": {
++      "version": "4.23.15",
++      "resolved": "https://registry.npmjs.org/tsx/-/tsx-4.23.15.tgz",
++      "integrity": "sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==",
+       "dev": true,
+       "license": "MIT",
+       "dependencies": {
+-        "prelude-ls": "^1.2.1"
++        "esbuild": "~0.28.0"
+       },
+-      "engines": {
+-        "node": ">= 0.8.0"
+-      }
+-    },
+-    "node_modules/typescript": {
+-      "version": "5.8.3",
+-      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.8.3.tgz",
+-      "integrity": "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==",
+-      "dev": true,
+-      "license": "Apache-2.0",
+       "bin": {
+-        "tsc": "bin/tsc",
+-        "tsserver": "bin/tsserver"
++        "tsx": "dist/cli.mjs"
+       },
+       "engines": {
+-        "node": ">=14.17"
++        "node": ">=18.0.0"
++      },
++      "optionalDependencies": {
++        "fsevents": "~2.3.3"
+       }
+     },
+-    "node_modules/typescript-eslint": {
+-      "version": "8.71.1",
++    "node_modules/tsx/node_modules/@esbuild/aix-ppc64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.28.2.tgz",
++      "integrity": "sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "aix"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/android-arm": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.28.2.tgz",
++      "integrity": "sha512-kXXoiPVVGQcnIYGOeaovwOURpniDBpSq4A03qkQ+BMQqtGG6HYap3xne9C1O1yo4TR3qxlCX5IqqmX6fFo2Lqg==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/android-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.28.2.tgz",
++      "integrity": "sha512-5YfKeeI8qWfBZIX+u2xZC3Zlb3Os/gLS2sbEKM+I4ZOcsWmHS2WLysCcQZDAFRslDUU5Oiq44gf6PYN1vGwG5A==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/android-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.28.2.tgz",
++      "integrity": "sha512-O387ite7SzUyCcy3JQX4P4bLtEA7bLLkx+esve5JHnyYfNTxcVpXZo9jhdB0lTKN44gztELTdU7nS8Nr16Fs1Q==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/darwin-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.28.2.tgz",
++      "integrity": "sha512-n4KqkOQrraxHJcgjM1RvwbigfQKIKJVpM7xp+KsxiyUSrRdIXnt73VhrPAx0fV44hgfmIVKjxMN9J1t5jySVkw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/darwin-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.28.2.tgz",
++      "integrity": "sha512-uq6suIWYP37qzGddBKPw5QEQPi6HiLGsO7UmkpfyaYNQ3D+rN6w6WfwH+nuqcGXWvawGwxOEroO4YGnFh95azw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/freebsd-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.28.2.tgz",
++      "integrity": "sha512-n+I0BTSRIoy+d6RPKnEVwql5UwBJolytvY4mAOIEJorKlqgPII8ix6slVVrfZ5Tnj7glIZvloylbB/EJPMWEXw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/freebsd-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.28.2.tgz",
++      "integrity": "sha512-78XJTJkvPs0kz2w61301PJjXl4g7q3JqiYMZ/M/yVI73EHBrCRTgkhu9oqG7vPqq+a/yadEW8aD+agKlk5xrmg==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-arm": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.28.2.tgz",
++      "integrity": "sha512-XlDnu2q5yoqems+xay6wSAcg9DDD7K9RLKZEBOMZm3ckNpJBvOX20tSfby8KfrrhINDyv9V2YVZKY/SpoGJI8w==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.28.2.tgz",
++      "integrity": "sha512-pW4AC0P3it8c7do9MVM4p51FzHzdM/TZrerurgRcHJ2WTa1VQ1CIq18xncfpBJw4ojkiZZrKW2yIBWBP92j6Ug==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-ia32": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.28.2.tgz",
++      "integrity": "sha512-CYbnj78HsIeA+DhgUKgFCfvNsTHFhMMrinUrMZpDXJXKN8T3XViTZ/+wtHeVxEWY8ewSzTFN+nRmSwO2tZaLUQ==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-loong64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.28.2.tgz",
++      "integrity": "sha512-buwkd8nsph4R+ajRvw0qM5Hja/TXQow3ptzWO2EbG/cqcIkHloRrdlBtQlshyYGTNFvfkfJ5tpPLVkY4DtsPfQ==",
++      "cpu": [
++        "loong64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-mips64el": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.28.2.tgz",
++      "integrity": "sha512-ZVykbDyk7519VwiNb9Lcj9m8XM6v5V9uKPvrEMkkEedVewf+0itkhahp4HDpgERXhwLRpWFypsGbG/J8s0QjJA==",
++      "cpu": [
++        "mips64el"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-ppc64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.28.2.tgz",
++      "integrity": "sha512-CAXl+Dtd9UUuJd8pKKdwh6MLm3MUMiqMPmhZ3tTSXPqfyQ3vDl6R5hZdZ/kYojK4ofXtdfSv1tFq8XzWx3heNQ==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-riscv64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.28.2.tgz",
++      "integrity": "sha512-GeXCej4IQtU1B+QlDV8W/RRvbzI3O/Stss+/bCXv4lZls5WGRtu2a+3JkA3i4qIUlMXpcHebWpF8AkJhATowuA==",
++      "cpu": [
++        "riscv64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-s390x": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.28.2.tgz",
++      "integrity": "sha512-3H1weTYZPxt/WOhByszQZybS9w5lKzUn1FDMsgEChbHWQwHYQQRfBxgCcZvPhjHfKyJjIievvMmEUawJrdY9Dg==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/linux-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.2.tgz",
++      "integrity": "sha512-4xTZr1FUmSoQW4XIWmit3tzQrUTZM+N3P0XV8xROKYF50XfI7xeO90+1bZvNwxIufQ9hDQVRJH5YhgPVF8A/HQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/netbsd-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.28.2.tgz",
++      "integrity": "sha512-sSATRjPeDBg3pdgHoQfoYBob11Kk1FGa9lui5RIHZCoCkJa9QKlvl3/vKz2usCmYYjs7ymJR/2Nnsqe+Hjt5nw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/netbsd-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.28.2.tgz",
++      "integrity": "sha512-lqnzCV+mM0gIADaKihiCg6ifgfU2L3h5E33rNQBN1Y4MaVGnzryzmvvf7UHxprpQdE8hpqLolJ9Rl+SkIRDpyw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/openbsd-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.28.2.tgz",
++      "integrity": "sha512-AL2qJILH7lNjrDmCQDvdxMfAUIv8KMNZOvrwAQ8i8//ntL9FflhOyMJ8OZSMBb8/AWXe3/5v5S20y3zCoZWKoQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/openbsd-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.28.2.tgz",
++      "integrity": "sha512-QtiuPytchRyC4rwUKhexJdQKvDuZ6hWloi3igqPQNUJCS1/v9EiO3UTOXR6A3FoMo4fnAKbWJdqaIwhOzh8qEw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/openharmony-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.28.2.tgz",
++      "integrity": "sha512-WkhYDmpTjLvGlScA1rwjRUmhl4k8oXR3cIbtqWmELgU/dFeHHlEllxDvdWcNJV9rbzCexB5vz8gtNewWLgCT7Q==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openharmony"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/sunos-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.28.2.tgz",
++      "integrity": "sha512-GPMSkTOtMnv2U2F8gxe4Io6qmVs+YKyp832Etqqxr0hFngmXQ3rzwytelm3GIn7T4VviRUlf3sOgBOiTdvaf7g==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "sunos"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/win32-arm64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.28.2.tgz",
++      "integrity": "sha512-PIhhEkE9uPBleRBrQEJpUn7MBnibZzbGzYWPmY3x+YoVg/95zbjB4CxPPOQ8l5tYYM4mMaCthF8/1DIfBQQyWQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/win32-ia32": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.28.2.tgz",
++      "integrity": "sha512-YmJbfTlvU7Sdn9BB+4PRES4oB6pxgS37MAONj+hBr/cpXS1aBPKXxNnDbu+QCWPj0o9dgyxeq79g6c5P8KeuYA==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/@esbuild/win32-x64": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.28.2.tgz",
++      "integrity": "sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/tsx/node_modules/esbuild": {
++      "version": "0.28.2",
++      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.28.2.tgz",
++      "integrity": "sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "MIT",
++      "bin": {
++        "esbuild": "bin/esbuild"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "optionalDependencies": {
++        "@esbuild/aix-ppc64": "0.28.2",
++        "@esbuild/android-arm": "0.28.2",
++        "@esbuild/android-arm64": "0.28.2",
++        "@esbuild/android-x64": "0.28.2",
++        "@esbuild/darwin-arm64": "0.28.2",
++        "@esbuild/darwin-x64": "0.28.2",
++        "@esbuild/freebsd-arm64": "0.28.2",
++        "@esbuild/freebsd-x64": "0.28.2",
++        "@esbuild/linux-arm": "0.28.2",
++        "@esbuild/linux-arm64": "0.28.2",
++        "@esbuild/linux-ia32": "0.28.2",
++        "@esbuild/linux-loong64": "0.28.2",
++        "@esbuild/linux-mips64el": "0.28.2",
++        "@esbuild/linux-ppc64": "0.28.2",
++        "@esbuild/linux-riscv64": "0.28.2",
++        "@esbuild/linux-s390x": "0.28.2",
++        "@esbuild/linux-x64": "0.28.2",
++        "@esbuild/netbsd-arm64": "0.28.2",
++        "@esbuild/netbsd-x64": "0.28.2",
++        "@esbuild/openbsd-arm64": "0.28.2",
++        "@esbuild/openbsd-x64": "0.28.2",
++        "@esbuild/openharmony-arm64": "0.28.2",
++        "@esbuild/sunos-x64": "0.28.2",
++        "@esbuild/win32-arm64": "0.28.2",
++        "@esbuild/win32-ia32": "0.28.2",
++        "@esbuild/win32-x64": "0.28.2"
++      }
++    },
++    "node_modules/type-check": {
++      "version": "0.4.0",
++      "resolved": "https://registry.npmjs.org/type-check/-/type-check-0.4.0.tgz",
++      "integrity": "sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "prelude-ls": "^1.2.1"
++      },
++      "engines": {
++        "node": ">= 0.8.0"
++      }
++    },
++    "node_modules/typescript": {
++      "version": "5.8.3",
++      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.8.3.tgz",
++      "integrity": "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "bin": {
++        "tsc": "bin/tsc",
++        "tsserver": "bin/tsserver"
++      },
++      "engines": {
++        "node": ">=14.17"
++      }
++    },
++    "node_modules/typescript-eslint": {
++      "version": "8.71.1",
+       "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.71.1.tgz",
+       "integrity": "sha512-oiNVPC3/NbV1FpaHU07l8O6ynqG9v4PAiW2WvTrAmZdR0f2HI/gE668ElMLCK7Xbsu5k2fK5C4fXNiq05j7/nQ==",
+       "dev": true,
+@@ -3166,6 +4132,25 @@
+         "typescript": ">=4.8.4 <6.1.0"
+       }
+     },
++    "node_modules/uint8array-extras": {
++      "version": "1.6.0",
++      "resolved": "https://registry.npmjs.org/uint8array-extras/-/uint8array-extras-1.6.0.tgz",
++      "integrity": "sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/undici-types": {
++      "version": "6.21.0",
++      "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
++      "integrity": "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/update-browserslist-db": {
+       "version": "1.3.4",
+       "resolved": "https://registry.npmjs.org/update-browserslist-db/-/update-browserslist-db-1.3.4.tgz",
+diff --git a/frontend/package.json b/frontend/package.json
+index 77fb39d..a3c3511 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -7,17 +7,21 @@
+     "dev": "vite",
+     "build": "tsc -b && vite build",
+     "lint": "eslint .",
+-    "preview": "vite preview"
++    "preview": "vite preview",
++    "desplegar": "tsx scripts/desplegar.ts",
++    "admin": "tsx scripts/admin.ts"
+   },
+   "dependencies": {
+     "@noble/ed25519": "^2.3.0",
+     "@noble/hashes": "^1.8.0",
++    "@stellar/stellar-sdk": "17.2.1",
+     "react": "^19.1.0",
+     "react-dom": "^19.1.0",
+     "react-router-dom": "^6.30.6"
+   },
+   "devDependencies": {
+     "@eslint/js": "^9.25.0",
++    "@types/node": "^22.20.5",
+     "@types/react": "^19.1.2",
+     "@types/react-dom": "^19.1.2",
+     "@vitejs/plugin-react": "^4.4.1",
+@@ -25,6 +29,7 @@
+     "eslint-plugin-react-hooks": "^5.2.0",
+     "eslint-plugin-react-refresh": "^0.4.19",
+     "globals": "^16.0.0",
++    "tsx": "^4.23.15",
+     "typescript": "~5.8.3",
+     "typescript-eslint": "^8.30.1",
+     "vite": "^6.3.5"
+diff --git a/frontend/scripts/admin.ts b/frontend/scripts/admin.ts
+new file mode 100644
+index 0000000..e2c9a69
+--- /dev/null
++++ b/frontend/scripts/admin.ts
+@@ -0,0 +1,33 @@
++// Administración del registro de nodos en el contrato (firma la cuenta administradora).
++//
++//   npm run admin -- estado  N2
++//   npm run admin -- revocar N2
++//   npm run admin -- alta    N2            (o una llave pública en hex)
++import { existsSync, readFileSync } from 'node:fs'
++import { dirname, resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
++import { Keypair } from '@stellar/stellar-sdk'
++import { altaNodo, enlaceTx, nodoActivo, revocarNodo } from '../src/lib/stellar.ts'
++import { llavesDemo } from '../src/lib/crypto.ts'
++
++const aqui = dirname(fileURLToPath(import.meta.url))
++const raiz = resolve(aqui, '../..')
++const config = JSON.parse(readFileSync(resolve(aqui, '../src/contrato.json'), 'utf8'))
++const [accion, objetivo] = process.argv.slice(2)
++
++if (!config.contractId) throw new Error('No hay contrato configurado. Corré primero "npm run desplegar".')
++if (!accion || !objetivo) {
++  console.log('Uso: npm run admin -- <estado|alta|revocar> <N1..N5 | llave hex>')
++  process.exit(1)
++}
++const llave = /^N\d+$/i.test(objetivo) ? llavesDemo(objetivo.toUpperCase()).publicKey : objetivo
++
++if (accion === 'estado') {
++  console.log(`${objetivo}: ${(await nodoActivo(config.contractId, llave)) ? 'activo' : 'no autorizado'}`)
++} else {
++  const ruta = resolve(raiz, '.marvin-admin.json')
++  if (!existsSync(ruta)) throw new Error('Falta .marvin-admin.json (la llave de la cuenta administradora).')
++  const admin = Keypair.fromSecret(JSON.parse(readFileSync(ruta, 'utf8')).secret)
++  const r = accion === 'revocar' ? await revocarNodo(config.contractId, admin, llave) : await altaNodo(config.contractId, admin, llave)
++  console.log(`${accion} ${objetivo}: ${enlaceTx(r.txHash)}`)
++}
+diff --git a/frontend/scripts/desplegar.ts b/frontend/scripts/desplegar.ts
+new file mode 100644
+index 0000000..0270f7d
+--- /dev/null
++++ b/frontend/scripts/desplegar.ts
+@@ -0,0 +1,44 @@
++// Despliega el contrato de Marvin en Stellar Testnet, registra los nodos de la
++// demo, prueba el flujo completo y deja la evidencia en docs/semana4.
++//
++//   npm run desplegar            (despliega si todavía no hay contrato)
++//   npm run desplegar -- --nuevo (fuerza un despliegue nuevo)
++import { existsSync, readFileSync, writeFileSync } from 'node:fs'
++import { dirname, resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
++import { Keypair } from '@stellar/stellar-sdk'
++import { enlaceContrato } from '../src/lib/stellar.ts'
++import { desplegarYProbar } from './despliegue.ts'
++
++const aqui = dirname(fileURLToPath(import.meta.url))
++const raiz = resolve(aqui, '../..')
++const RUTA_WASM = resolve(raiz, 'contracts/dist/marvin.wasm')
++const RUTA_CONFIG = resolve(aqui, '../src/contrato.json')
++const RUTA_ADMIN = resolve(raiz, '.marvin-admin.json') // ignorado por git
++const RUTA_EVIDENCIA = resolve(raiz, 'docs/semana4/Despliegue.md')
++
++function cuentaAdmin(): Keypair {
++  if (existsSync(RUTA_ADMIN)) return Keypair.fromSecret(JSON.parse(readFileSync(RUTA_ADMIN, 'utf8')).secret)
++  const kp = Keypair.random()
++  writeFileSync(RUTA_ADMIN, JSON.stringify({ publicKey: kp.publicKey(), secret: kp.secret() }, null, 2))
++  return kp
++}
++
++async function main() {
++  const config = JSON.parse(readFileSync(RUTA_CONFIG, 'utf8'))
++  if (config.contractId && !process.argv.includes('--nuevo')) {
++    console.log(`Ya hay un contrato configurado: ${config.contractId}`)
++    console.log('Usá "npm run desplegar -- --nuevo" para desplegar otro.')
++    return
++  }
++  const r = await desplegarYProbar(new Uint8Array(readFileSync(RUTA_WASM)), cuentaAdmin(), console.log)
++  writeFileSync(RUTA_CONFIG, JSON.stringify({ contractId: r.contractId, admin: r.admin, desplegadoEn: r.fecha }, null, 2) + '\n')
++  writeFileSync(RUTA_EVIDENCIA, r.evidencia)
++  console.log('  ✓ src/contrato.json y docs/semana4/Despliegue.md actualizados')
++  console.log(`\nLISTO. Contrato: ${enlaceContrato(r.contractId)}`)
++}
++
++main().catch((e) => {
++  console.error('\n✗ ERROR:', e instanceof Error ? e.message : e)
++  process.exit(1)
++})
+diff --git a/frontend/scripts/despliegue.ts b/frontend/scripts/despliegue.ts
+new file mode 100644
+index 0000000..74e0810
+--- /dev/null
++++ b/frontend/scripts/despliegue.ts
+@@ -0,0 +1,148 @@
++// Lógica de despliegue y pruebas en la red, sin acceso a archivos: la usan el
++// script de Node (scripts/desplegar.ts) y, si hace falta, un navegador.
++import { Keypair } from '@stellar/stellar-sdk'
++import {
++  ErrorContrato,
++  RED,
++  altaNodo,
++  consultar,
++  crearContrato,
++  enlaceContrato,
++  enlaceCuenta,
++  enlaceTx,
++  fondear,
++  nodoActivo,
++  registrarReporte,
++  subirWasm,
++} from '../src/lib/stellar.ts'
++import { firmar, generarLlaves, hashReporte, llavesDemo } from '../src/lib/crypto.ts'
++import { NODOS_BASE, type PayloadReporte } from '../src/lib/model.ts'
++
++export interface Resultado {
++  contractId: string
++  admin: string
++  fecha: string
++  evidencia: string
++}
++
++function reportePrueba(nodoId: string, llaves: { publicKey: string; privateKey: string }, detalle: string) {
++  const p: PayloadReporte = {
++    id: `R-PRUEBA-${nodoId}`,
++    tipo: 'victima',
++    zona: 'B2',
++    detalle,
++    personas: 1,
++    datosPersonales: '',
++    nodo: llaves.publicKey,
++    ts: Date.now(),
++    anulaA: null,
++  }
++  const hash = hashReporte(p)
++  return { hash, llave: llaves.publicKey, firma: firmar(hash, llaves.privateKey), tipo: 1, anula: null }
++}
++
++async function esperaError(promesa: Promise<unknown>, codigo: number | null): Promise<string> {
++  try {
++    await promesa
++  } catch (e) {
++    const err = e as ErrorContrato
++    if (codigo === null || err.codigo === codigo) return err.message
++    throw new Error(`Se esperaba el error #${codigo} y llegó: ${err.message}`)
++  }
++  throw new Error('Se esperaba que el contrato rechazara la operación y la aceptó')
++}
++
++const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
++
++export async function desplegarYProbar(wasm: Uint8Array, admin: Keypair, log: (t: string) => void): Promise<Resultado> {
++  const paso = (t: string) => log(`\n▶ ${t}`)
++  const ok = (t: string) => log(`  ✓ ${t}`)
++
++  paso('Cuenta administradora')
++  await fondear(admin.publicKey())
++  ok(`${admin.publicKey()} (fondeada con Friendbot)`)
++
++  paso('Subiendo el WASM del contrato')
++  const subida = await subirWasm(wasm, admin)
++  ok(`tx ${subida.txHash}`)
++
++  paso('Creando el contrato')
++  const { contractId, txHash: txCrear } = await crearContrato(subida.wasmHash, admin)
++  ok(`contrato ${contractId}`)
++
++  paso('Registrando las llaves de los nodos N1–N5')
++  const altas: string[] = []
++  for (const n of NODOS_BASE) {
++    const llaves = llavesDemo(n.id)
++    const r = await altaNodo(contractId, admin, llaves.publicKey)
++    altas.push(`| ${n.id} | ${n.brigada} | \`${llaves.publicKey.slice(0, 16)}…\` | [${r.txHash.slice(0, 10)}…](${enlaceTx(r.txHash)}) |`)
++    ok(`${n.id} ${llaves.publicKey.slice(0, 12)}…`)
++  }
++
++  paso('Prueba 1: la puerta de enlace publica un reporte firmado por N1')
++  const puerta = Keypair.random()
++  await fondear(puerta.publicKey())
++  const valido = reportePrueba('N1', llavesDemo('N1'), 'Prueba de despliegue: reporte válido')
++  const pub = await registrarReporte(contractId, puerta, valido)
++  ok(`registrado en el ledger ${pub.ledger} · tx ${pub.txHash}`)
++
++  paso('Prueba 2: cualquiera puede consultarlo sin firmar nada')
++  const reg = await consultar(contractId, valido.hash)
++  if (!reg || reg.nodo !== valido.llave) throw new Error('La consulta no devolvió el registro esperado')
++  ok(`consultar(hash) → ledger ${reg.ledger}, nodo ${reg.nodo.slice(0, 12)}…`)
++
++  paso('Prueba 3: el contrato rechaza un nodo no registrado')
++  const intruso = reportePrueba('X', generarLlaves(), 'Nodo desconocido')
++  const m3 = await esperaError(registrarReporte(contractId, puerta, intruso), 1)
++  ok(m3)
++
++  paso('Prueba 4: el contrato rechaza el mismo reporte dos veces')
++  const m4 = await esperaError(registrarReporte(contractId, puerta, valido), 2)
++  ok(m4)
++
++  paso('Prueba 5: el contrato rechaza una firma falsa con la llave de N2')
++  const otro = reportePrueba('N2', llavesDemo('N2'), 'Firma falsificada')
++  const falsa = { ...otro, firma: firmar(otro.hash, generarLlaves().privateKey) }
++  const m5 = await esperaError(registrarReporte(contractId, puerta, falsa), null)
++  ok(m5)
++
++  paso('Verificando que N1–N5 figuran activos')
++  for (const n of NODOS_BASE) {
++    if (!(await nodoActivo(contractId, llavesDemo(n.id).publicKey))) throw new Error(`${n.id} no figura activo`)
++  }
++  ok('todos activos')
++
++  const fecha = new Date().toISOString()
++  const evidencia = [
++    '# Evidencia de despliegue en Stellar Testnet',
++    '',
++    `> Generado automáticamente por \`frontend/scripts/despliegue.ts\` el ${fecha}.`,
++    '',
++    '| Dato | Valor |',
++    '| --- | --- |',
++    `| Red | Stellar ${RED.nombre} (${RED.rpcUrl}) |`,
++    `| Contrato | [\`${contractId}\`](${enlaceContrato(contractId)}) |`,
++    `| Cuenta administradora | [\`${admin.publicKey()}\`](${enlaceCuenta(admin.publicKey())}) |`,
++    `| WASM (SHA-256) | \`${hex(subida.wasmHash)}\` |`,
++    `| Subida del WASM | [${subida.txHash.slice(0, 16)}…](${enlaceTx(subida.txHash)}) |`,
++    `| Creación del contrato | [${txCrear.slice(0, 16)}…](${enlaceTx(txCrear)}) |`,
++    '',
++    '## Nodos registrados',
++    '',
++    '| Nodo | Brigada | Llave pública | Transacción |',
++    '| --- | --- | --- | --- |',
++    ...altas,
++    '',
++    '## Pruebas en la red',
++    '',
++    '| # | Prueba | Resultado |',
++    '| :-: | --- | --- |',
++    `| 1 | La puerta de enlace publica un reporte firmado por N1 | ✅ Registrado en el ledger ${pub.ledger} · [ver transacción](${enlaceTx(pub.txHash)}) |`,
++    `| 2 | Consulta pública del hash, sin firmar | ✅ Devuelve ledger ${reg.ledger} y la llave de N1 |`,
++    `| 3 | Reporte de un nodo no registrado | ✅ Rechazado: ${m3} |`,
++    `| 4 | El mismo reporte publicado dos veces | ✅ Rechazado: ${m4} |`,
++    '| 5 | Firma falsa usando la llave de N2 | ✅ Rechazado por la verificación ed25519 del contrato |',
++    '',
++  ].join('\n')
++  return { contractId, admin: admin.publicKey(), fecha, evidencia }
++}
+diff --git a/frontend/src/components/Layout.tsx b/frontend/src/components/Layout.tsx
+index 924671d..124e6af 100644
+--- a/frontend/src/components/Layout.tsx
++++ b/frontend/src/components/Layout.tsx
+@@ -1,5 +1,7 @@
+ import { NavLink, Outlet } from 'react-router-dom'
+-import { useMarvin } from '../lib/store'
++import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
++import { corto } from '../lib/model'
++import { enlaceContrato } from '../lib/stellar'
+ 
+ const RUTAS = [
+   { to: '/', num: '·', texto: 'Inicio', end: true },
+@@ -18,7 +20,7 @@ export default function Layout() {
+     <div className="app">
+       <aside className="sidebar">
+         <div className="brand">
+-          <img src="/marvin.svg" alt="" />
++          <img src={`${import.meta.env.BASE_URL}marvin.svg`} alt="" />
+           <div>
+             <b>Marvin</b>
+             <small>Reportes de emergencia offline-first</small>
+@@ -37,7 +39,17 @@ export default function Layout() {
+             <span className="dot" style={{ background: 'currentColor' }} />
+             {enlace}
+           </span>
+-          <span>Stellar Testnet · ledger {estado.ledger.toLocaleString('es-MX')}</span>
++          {MODO_REAL ? (
++            <span>
++              Stellar Testnet · contrato{' '}
++              <a href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer" className="mono">
++                {corto(CONTRATO.contractId, 4)}
++              </a>
++              {estado.ledger > 0 && <> · ledger {estado.ledger.toLocaleString('es-MX')}</>}
++            </span>
++          ) : (
++            <span>Stellar Testnet (simulado) · ledger {estado.ledger.toLocaleString('es-MX')}</span>
++          )}
+           <button className="btn" onClick={reiniciar}>
+             Reiniciar demo
+           </button>
+diff --git a/frontend/src/components/ui.tsx b/frontend/src/components/ui.tsx
+index 95acd65..94940ce 100644
+--- a/frontend/src/components/ui.tsx
++++ b/frontend/src/components/ui.tsx
+@@ -15,6 +15,7 @@ export function Tipo({ tipo, corto = false }: { tipo: TipoReporte; corto?: boole
+ const ESTADOS: Record<EstadoReporte, { texto: string; clase: string }> = {
+   en_malla: { texto: 'En la malla', clase: 'acc' },
+   en_gateway: { texto: 'En cola', clase: '' },
++  publicando: { texto: 'Publicando…', clase: 'acc' },
+   publicado: { texto: 'En Stellar', clase: 'ok' },
+   rechazado: { texto: 'Rechazado', clase: 'err' },
+ }
+diff --git a/frontend/src/contrato.json b/frontend/src/contrato.json
+new file mode 100644
+index 0000000..e2ab1fa
+--- /dev/null
++++ b/frontend/src/contrato.json
+@@ -0,0 +1,5 @@
++{
++  "contractId": "CD5LRX24DHEDDHS47TN7IFBD4EMAZSLDTABA7Z7UPDYN3I7ZGI5RRGDR",
++  "admin": "GCASTATANR2VXZHM5J2BQQ6HRFKBEJ2RQPP2TWAWV3QL2QAEFCWRBSQT",
++  "desplegadoEn": "2026-10-19T02:15:07.385Z"
++}
+diff --git a/frontend/src/lib/crypto.ts b/frontend/src/lib/crypto.ts
+index 219bec8..320ff4e 100644
+--- a/frontend/src/lib/crypto.ts
++++ b/frontend/src/lib/crypto.ts
+@@ -12,6 +12,14 @@ export function generarLlaves(): { publicKey: string; privateKey: string } {
+   return { privateKey: bytesToHex(priv), publicKey: bytesToHex(ed.getPublicKey(priv)) }
+ }
+ 
++// Llaves fijas de los nodos de demostración N1–N5. Se derivan de una semilla
++// pública para que el script de despliegue pueda registrarlas en el contrato.
++// Solo sirven para la demo en Testnet: un nodo real genera su llave en el ESP32.
++export function llavesDemo(id: string): { publicKey: string; privateKey: string } {
++  const priv = sha256(utf8ToBytes(`marvin-demo:${id}`))
++  return { privateKey: bytesToHex(priv), publicKey: bytesToHex(ed.getPublicKey(priv)) }
++}
++
+ export function hashReporte(p: PayloadReporte): string {
+   return bytesToHex(sha256(utf8ToBytes(canonico(p))))
+ }
+diff --git a/frontend/src/lib/model.ts b/frontend/src/lib/model.ts
+index b28170d..fac86fe 100644
+--- a/frontend/src/lib/model.ts
++++ b/frontend/src/lib/model.ts
+@@ -7,6 +7,7 @@ export type TipoReporte = 'victima' | 'colapso' | 'ruta' | 'zona'
+ export type EstadoReporte =
+   | 'en_malla' // viajando de nodo en nodo
+   | 'en_gateway' // llegó a la puerta de enlace, esperando enlace
++  | 'publicando' // transacción enviada a Stellar, esperando confirmación
+   | 'publicado' // registrado en Stellar (simulado)
+   | 'rechazado' // firma inválida o nodo revocado
+ 
+diff --git a/frontend/src/lib/stellar.ts b/frontend/src/lib/stellar.ts
+new file mode 100644
+index 0000000..a60c98b
+--- /dev/null
++++ b/frontend/src/lib/stellar.ts
+@@ -0,0 +1,211 @@
++// Conexión con el contrato de Marvin en Stellar Testnet.
++// Este módulo no depende de React ni de Vite: lo usan tanto el front como el
++// script de despliegue (scripts/desplegar.ts), así el mismo código que se
++// prueba al desplegar es el que corre en el navegador.
++import {
++  Account,
++  Address,
++  BASE_FEE,
++  Contract,
++  Keypair,
++  Networks,
++  Operation,
++  TransactionBuilder,
++  nativeToScVal,
++  rpc,
++  scValToNative,
++  xdr,
++  type Transaction,
++} from '@stellar/stellar-sdk'
++
++export const RED = {
++  nombre: 'testnet',
++  rpcUrl: 'https://soroban-testnet.stellar.org',
++  passphrase: Networks.TESTNET,
++  explorador: 'https://stellar.expert/explorer/testnet',
++}
++
++export const enlaceTx = (hash: string) => `${RED.explorador}/tx/${hash}`
++export const enlaceContrato = (id: string) => `${RED.explorador}/contract/${id}`
++export const enlaceCuenta = (id: string) => `${RED.explorador}/account/${id}`
++
++const ERRORES: Record<number, string> = {
++  1: 'Nodo no autorizado en el contrato',
++  2: 'El reporte ya estaba registrado',
++  3: 'Tipo de reporte inválido',
++  4: 'La corrección apunta a un reporte no registrado',
++}
++
++export class ErrorContrato extends Error {
++  codigo?: number
++  constructor(mensaje: string, codigo?: number) {
++    super(mensaje)
++    this.codigo = codigo
++  }
++}
++
++function traducirError(texto: string): ErrorContrato {
++  const m = /Error\(Contract, #(\d+)\)/.exec(texto)
++  if (m) {
++    const codigo = Number(m[1])
++    return new ErrorContrato(ERRORES[codigo] ?? `Error del contrato #${codigo}`, codigo)
++  }
++  if (/ed25519|Crypto|InvalidInput/i.test(texto)) return new ErrorContrato('Firma inválida: el contrato la rechazó')
++  return new ErrorContrato(texto.slice(0, 300))
++}
++
++export function servidor(): rpc.Server {
++  return new rpc.Server(RED.rpcUrl)
++}
++
++const hexABytes = (hex: string) => Uint8Array.from(hex.match(/../g)!.map((b) => parseInt(b, 16)))
++const bytesN = (hex: string) => xdr.ScVal.scvBytes(hexABytes(hex))
++const opcionBytes = (hex: string | null) => (hex ? bytesN(hex) : xdr.ScVal.scvVoid())
++
++/** Fondea una cuenta nueva en Testnet con Friendbot. */
++export async function fondear(publicKey: string): Promise<void> {
++  const s = servidor()
++  try {
++    await s.getAccount(publicKey)
++    return // ya existe
++  } catch {
++    /* no existe: se fondea */
++  }
++  await s.requestAirdrop(publicKey)
++}
++
++async function enviar(tx: Transaction, firmante: Keypair): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
++  const s = servidor()
++  let preparada: Transaction
++  try {
++    preparada = await s.prepareTransaction(tx)
++  } catch (e) {
++    throw traducirError(String((e as Error)?.message ?? e))
++  }
++  preparada.sign(firmante)
++  const envio = await s.sendTransaction(preparada)
++  if (envio.status === 'ERROR') {
++    throw traducirError(JSON.stringify(envio.errorResult?.toXDR('base64') ?? envio))
++  }
++  const final = await s.pollTransaction(envio.hash, { attempts: 30 })
++  if (final.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
++    throw new ErrorContrato(`La transacción ${envio.hash} terminó con estado ${final.status}`)
++  }
++  return final as rpc.Api.GetSuccessfulTransactionResponse
++}
++
++async function invocar(contractId: string, firmante: Keypair, metodo: string, args: xdr.ScVal[]) {
++  const s = servidor()
++  const cuenta = await s.getAccount(firmante.publicKey())
++  const tx = new TransactionBuilder(cuenta, { fee: BASE_FEE, networkPassphrase: RED.passphrase })
++    .addOperation(new Contract(contractId).call(metodo, ...args))
++    .setTimeout(60)
++    .build()
++  const r = await enviar(tx, firmante)
++  return { txHash: r.txHash, ledger: r.ledger, valor: r.returnValue ? scValToNative(r.returnValue) : undefined }
++}
++
++async function leer(contractId: string, metodo: string, args: xdr.ScVal[]): Promise<unknown> {
++  const s = servidor()
++  // Las lecturas se simulan: no se firma ni se paga nada.
++  const origen = new Account(Keypair.random().publicKey(), '0')
++  const tx = new TransactionBuilder(origen, { fee: BASE_FEE, networkPassphrase: RED.passphrase })
++    .addOperation(new Contract(contractId).call(metodo, ...args))
++    .setTimeout(60)
++    .build()
++  const sim = await s.simulateTransaction(tx)
++  if (rpc.Api.isSimulationError(sim)) throw traducirError(sim.error)
++  const ret = (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval
++  return ret ? scValToNative(ret) : undefined
++}
++
++// ---------- Despliegue y administración (los usa el script) ----------
++
++export async function subirWasm(wasm: Uint8Array, admin: Keypair): Promise<{ wasmHash: Uint8Array; txHash: string }> {
++  const s = servidor()
++  const cuenta = await s.getAccount(admin.publicKey())
++  const tx = new TransactionBuilder(cuenta, { fee: BASE_FEE, networkPassphrase: RED.passphrase })
++    .addOperation(Operation.uploadContractWasm({ wasm }))
++    .setTimeout(60)
++    .build()
++  const r = await enviar(tx, admin)
++  return { wasmHash: scValToNative(r.returnValue!) as Uint8Array, txHash: r.txHash }
++}
++
++export async function crearContrato(wasmHash: Uint8Array, admin: Keypair): Promise<{ contractId: string; txHash: string }> {
++  const s = servidor()
++  const cuenta = await s.getAccount(admin.publicKey())
++  const tx = new TransactionBuilder(cuenta, { fee: BASE_FEE, networkPassphrase: RED.passphrase })
++    .addOperation(
++      Operation.createCustomContract({
++        address: new Address(admin.publicKey()),
++        wasmHash,
++        salt: Uint8Array.from(Keypair.random().rawPublicKey()),
++        constructorArgs: [new Address(admin.publicKey()).toScVal()],
++      }),
++    )
++    .setTimeout(60)
++    .build()
++  const r = await enviar(tx, admin)
++  const contractId = Address.fromScVal(r.returnValue!).toString()
++  return { contractId, txHash: r.txHash }
++}
++
++export async function altaNodo(contractId: string, admin: Keypair, llaveHex: string) {
++  return invocar(contractId, admin, 'alta_nodo', [bytesN(llaveHex)])
++}
++
++export async function revocarNodo(contractId: string, admin: Keypair, llaveHex: string) {
++  return invocar(contractId, admin, 'revocar_nodo', [bytesN(llaveHex)])
++}
++
++// ---------- Lo que usa la puerta de enlace ----------
++
++export interface ReporteAPublicar {
++  hash: string
++  llave: string
++  firma: string
++  tipo: number
++  anula: string | null // hash del reporte que corrige
++}
++
++export async function registrarReporte(contractId: string, puerta: Keypair, r: ReporteAPublicar) {
++  return invocar(contractId, puerta, 'registrar_reporte', [
++    new Address(puerta.publicKey()).toScVal(),
++    bytesN(r.hash),
++    bytesN(r.llave),
++    bytesN(r.firma),
++    nativeToScVal(r.tipo, { type: 'u32' }),
++    opcionBytes(r.anula),
++  ])
++}
++
++// ---------- Lecturas públicas ----------
++
++export interface RegistroEnCadena {
++  nodo: string
++  tipo: number
++  anula: string | null
++  ledger: number
++  timestamp: number
++  puerta: string
++}
++
++const aHex = (b: unknown) => (b ? Array.from(b as Uint8Array, (x) => x.toString(16).padStart(2, '0')).join('') : null)
++
++export async function consultar(contractId: string, hashHex: string): Promise<RegistroEnCadena | null> {
++  const v = (await leer(contractId, 'consultar', [bytesN(hashHex)])) as Record<string, unknown> | undefined
++  if (!v) return null
++  return {
++    nodo: aHex(v.nodo)!,
++    tipo: Number(v.tipo),
++    anula: aHex(v.anula),
++    ledger: Number(v.ledger),
++    timestamp: Number(v.timestamp),
++    puerta: String(v.puerta),
++  }
++}
++
++export async function nodoActivo(contractId: string, llaveHex: string): Promise<boolean> {
++  return Boolean(await leer(contractId, 'nodo_activo', [bytesN(llaveHex)]))
++}
+diff --git a/frontend/src/lib/store.tsx b/frontend/src/lib/store.tsx
+index 2566bf2..e9a5a73 100644
+--- a/frontend/src/lib/store.tsx
++++ b/frontend/src/lib/store.tsx
+@@ -1,4 +1,5 @@
+-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, type ReactNode } from 'react'
++import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
++import { Keypair } from '@stellar/stellar-sdk'
+ import {
+   GATEWAY_ID,
+   NODOS_BASE,
+@@ -11,7 +12,14 @@ import {
+   type Reporte,
+   type TipoReporte,
+ } from './model'
+-import { firmar, generarLlaves, hashReporte, hexAleatorio, verificar } from './crypto'
++import { firmar, generarLlaves, hashReporte, hexAleatorio, llavesDemo, verificar } from './crypto'
++import { ErrorContrato, fondear, registrarReporte } from './stellar'
++import contrato from '../contrato.json'
++
++// Con un contrato desplegado, la puerta de enlace publica de verdad en Stellar Testnet.
++// Sin él (contrato.json vacío), la publicación se simula como en la semana 3.
++export const CONTRATO: { contractId: string; admin: string; desplegadoEn: string } = contrato
++export const MODO_REAL = Boolean(CONTRATO.contractId)
+ 
+ interface Evento {
+   ts: number
+@@ -37,8 +45,13 @@ type Accion =
+   | { type: 'revocar'; id: string }
+   | { type: 'reactivar'; id: string }
+   | { type: 'reiniciar'; estado: Estado }
++  | { type: 'publicando'; id: string }
++  | { type: 'publicadoReal'; id: string; txHash: string; ledger: number }
++  | { type: 'rechazadoRed'; id: string; motivo: string }
++  | { type: 'reintentar'; id: string; motivo: string }
+ 
+-const CLAVE = 'marvin-demo-v1'
++const CLAVE = MODO_REAL ? `marvin-demo-v2-${CONTRATO.contractId}` : 'marvin-demo-v2'
++const CLAVE_PUERTA = 'marvin-puerta-testnet'
+ 
+ function log(e: Estado, texto: string, tipo: Evento['tipo'] = 'info'): Evento[] {
+   return [{ ts: Date.now(), texto, tipo }, ...e.bitacora].slice(0, 60)
+@@ -73,7 +86,7 @@ function construirReporte(
+ }
+ 
+ function estadoInicial(): Estado {
+-  const nodos: Nodo[] = NODOS_BASE.map((n) => ({ ...n, ...generarLlaves(), estado: 'activo' }))
++  const nodos: Nodo[] = NODOS_BASE.map((n) => ({ ...n, ...llavesDemo(n.id), estado: 'activo' }))
+   const ahora = Date.now()
+   const por = (id: string) => nodos.find((n) => n.id === id)!
+   const semilla: [string, TipoReporte, string, string, number, string, number][] = [
+@@ -95,7 +108,8 @@ function estadoInicial(): Estado {
+       anulaA: null,
+       ts: ahora - minutos * 60_000,
+     })
+-    const publicado = i < 4
++    // En modo real nada se da por publicado: la puerta de enlace lo publica de verdad.
++    const publicado = !MODO_REAL && i < 4
+     ledger += 37
+     return {
+       ...r,
+@@ -112,9 +126,17 @@ function estadoInicial(): Estado {
+     nodos,
+     reportes,
+     enlace: 'sin',
+-    ledger: ledger + 120,
++    ledger: MODO_REAL ? 0 : ledger + 120,
+     ticks: 0,
+-    bitacora: [{ ts: ahora, texto: 'Demo iniciada: 6 reportes de ejemplo, enlace a internet caído.', tipo: 'info' }],
++    bitacora: [
++      {
++        ts: ahora,
++        texto: MODO_REAL
++          ? 'Demo iniciada: 6 reportes de ejemplo en la puerta de enlace. Activá un enlace para publicarlos en Stellar Testnet.'
++          : 'Demo iniciada: 6 reportes de ejemplo, enlace a internet caído.',
++        tipo: 'info',
++      },
++    ],
+   }
+ }
+ 
+@@ -150,7 +172,7 @@ function avanzarMalla(e: Estado): Estado {
+ }
+ 
+ function publicar(e: Estado, txHash: string): Estado {
+-  if (e.enlace === 'sin') return e
++  if (MODO_REAL || e.enlace === 'sin') return e
+   const cada = e.enlace === 'satelital' ? 3 : 2 // el satelital es más lento
+   if (e.ticks % cada !== 0) return e
+   const cola = e.reportes
+@@ -197,21 +219,71 @@ function reducer(e: Estado, a: Accion): Estado {
+       return { ...e, nodos: e.nodos.map((n) => (n.id === a.id ? { ...n, estado: 'activo' } : n)), bitacora: log(e, `Llave de ${a.id} reactivada.`, 'ok') }
+     case 'reiniciar':
+       return a.estado
++    case 'publicando':
++      return { ...e, reportes: e.reportes.map((r) => (r.id === a.id ? { ...r, estado: 'publicando' } : r)) }
++    case 'publicadoReal':
++      return {
++        ...e,
++        ledger: Math.max(e.ledger, a.ledger),
++        reportes: e.reportes.map((r) =>
++          r.id === a.id ? { ...r, estado: 'publicado', txHash: a.txHash, ledger: a.ledger, publicadoEn: Date.now() } : r,
++        ),
++        bitacora: log(e, `${a.id} registrado en Stellar Testnet (ledger ${a.ledger.toLocaleString('es-MX')}).`, 'ok'),
++      }
++    case 'rechazadoRed':
++      return {
++        ...e,
++        reportes: e.reportes.map((r) => (r.id === a.id ? { ...r, estado: 'rechazado', motivoRechazo: a.motivo } : r)),
++        bitacora: log(e, `${a.id} rechazado por el contrato: ${a.motivo}.`, 'error'),
++      }
++    case 'reintentar':
++      return {
++        ...e,
++        reportes: e.reportes.map((r) => (r.id === a.id ? { ...r, estado: 'en_gateway' } : r)),
++        bitacora: log(e, `No se pudo publicar ${a.id} (${a.motivo}). Se reintenta en unos segundos.`, 'error'),
++      }
+   }
+ }
+ 
+ function cargar(): Estado {
+   try {
+     const raw = localStorage.getItem(CLAVE)
+-    if (raw) return JSON.parse(raw) as Estado
++    if (raw) {
++      const e = JSON.parse(raw) as Estado
++      // Una publicación interrumpida al recargar vuelve a la cola.
++      return { ...e, reportes: e.reportes.map((r) => (r.estado === 'publicando' ? { ...r, estado: 'en_gateway' } : r)) }
++    }
+   } catch {
+     /* sin almacenamiento: se arranca de cero */
+   }
+   return estadoInicial()
+ }
+ 
++export interface Puerta {
++  publicKey: string
++  estado: 'sin_fondos' | 'fondeando' | 'lista' | 'error'
++  error?: string
++}
++
++function cuentaPuerta(): Keypair {
++  try {
++    const guardada = localStorage.getItem(CLAVE_PUERTA)
++    if (guardada) return Keypair.fromSecret(guardada)
++  } catch {
++    /* se genera una nueva */
++  }
++  const kp = Keypair.random()
++  try {
++    localStorage.setItem(CLAVE_PUERTA, kp.secret())
++  } catch {
++    /* ignorar */
++  }
++  return kp
++}
++
+ interface Ctx {
+   estado: Estado
++  puerta: Puerta | null
+   enviarReporte: (nodoId: string, datos: Omit<PayloadReporte, 'id' | 'nodo' | 'ts'>) => Reporte | null
+   setEnlace: (e: Enlace) => void
+   asignar: (id: string, brigada: string) => void
+@@ -231,6 +303,59 @@ export function MarvinProvider({ children }: { children: ReactNode }) {
+     return () => clearInterval(t)
+   }, [])
+ 
++  // ---- Publicación real en Stellar Testnet ----
++  const keypair = useRef<Keypair | null>(null)
++  const ocupado = useRef(false)
++  const esperarHasta = useRef(0)
++  const [puerta, setPuerta] = useState<Puerta | null>(null)
++
++  useEffect(() => {
++    if (!MODO_REAL) return
++    keypair.current = cuentaPuerta()
++    setPuerta({ publicKey: keypair.current.publicKey(), estado: 'sin_fondos' })
++  }, [])
++
++  useEffect(() => {
++    if (!MODO_REAL || !keypair.current || estado.enlace === 'sin' || ocupado.current) return
++    if (Date.now() < esperarHasta.current) return
++    const siguiente = estado.reportes
++      .filter((r) => r.estado === 'en_gateway')
++      .sort((a, b) => a.prioridad - b.prioridad || a.ts - b.ts)[0]
++    if (!siguiente) return
++    const kp = keypair.current
++    ocupado.current = true
++    const original = siguiente.anulaA ? estado.reportes.find((r) => r.id === siguiente.anulaA) : undefined
++    ;(async () => {
++      try {
++        if (puerta?.estado !== 'lista') {
++          setPuerta({ publicKey: kp.publicKey(), estado: 'fondeando' })
++          await fondear(kp.publicKey())
++          setPuerta({ publicKey: kp.publicKey(), estado: 'lista' })
++        }
++        dispatch({ type: 'publicando', id: siguiente.id })
++        const r = await registrarReporte(CONTRATO.contractId, kp, {
++          hash: siguiente.hash,
++          llave: siguiente.nodo,
++          firma: siguiente.firma,
++          tipo: siguiente.prioridad,
++          anula: original?.estado === 'publicado' ? original.hash : null,
++        })
++        dispatch({ type: 'publicadoReal', id: siguiente.id, txHash: r.txHash, ledger: r.ledger })
++      } catch (err) {
++        if (err instanceof ErrorContrato && err.codigo) {
++          dispatch({ type: 'rechazadoRed', id: siguiente.id, motivo: err.message })
++        } else {
++          const motivo = err instanceof Error ? err.message.slice(0, 120) : 'error de red'
++          esperarHasta.current = Date.now() + 8000
++          dispatch({ type: 'reintentar', id: siguiente.id, motivo })
++          setPuerta((p) => (p && p.estado !== 'lista' ? { ...p, estado: 'error', error: motivo } : p))
++        }
++      } finally {
++        ocupado.current = false
++      }
++    })()
++  }, [estado.ticks, estado.enlace, estado.reportes, puerta?.estado])
++
+   useEffect(() => {
+     try {
+       localStorage.setItem(CLAVE, JSON.stringify(estado))
+@@ -271,6 +396,7 @@ export function MarvinProvider({ children }: { children: ReactNode }) {
+   const valor = useMemo<Ctx>(
+     () => ({
+       estado,
++      puerta,
+       enviarReporte,
+       setEnlace: (enlace) => dispatch({ type: 'enlace', enlace }),
+       asignar: (id, brigada) => dispatch({ type: 'asignar', id, brigada }),
+@@ -279,7 +405,7 @@ export function MarvinProvider({ children }: { children: ReactNode }) {
+       reactivar: (id) => dispatch({ type: 'reactivar', id }),
+       reiniciar: () => dispatch({ type: 'reiniciar', estado: estadoInicial() }),
+     }),
+-    [estado, enviarReporte, altaNodo],
++    [estado, puerta, enviarReporte, altaNodo],
+   )
+ 
+   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>
+@@ -295,7 +421,7 @@ export function useMarvin(): Ctx {
+ // Reportes que ya llegaron al centro de mando y siguen vigentes: los anulados por una corrección quedan fuera del panorama.
+ // eslint-disable-next-line react-refresh/only-export-components
+ export function vigentes(reportes: Reporte[]): Reporte[] {
+-  const recibido = (r: Reporte) => r.estado === 'en_gateway' || r.estado === 'publicado'
++  const recibido = (r: Reporte) => r.estado === 'en_gateway' || r.estado === 'publicando' || r.estado === 'publicado'
+   const anulados = new Set(reportes.filter((r) => r.anulaA && recibido(r)).map((r) => r.anulaA))
+   return reportes.filter((r) => recibido(r) && !anulados.has(r.id))
+ }
+diff --git a/frontend/src/pages/Admin.tsx b/frontend/src/pages/Admin.tsx
+index 76598bf..4380ea9 100644
+--- a/frontend/src/pages/Admin.tsx
++++ b/frontend/src/pages/Admin.tsx
+@@ -1,7 +1,7 @@
+ import { useState } from 'react'
+ import { Page } from '../components/ui'
+ import { corto } from '../lib/model'
+-import { useMarvin } from '../lib/store'
++import { MODO_REAL, useMarvin } from '../lib/store'
+ 
+ export default function Admin() {
+   const { estado, altaNodo, revocar, reactivar } = useMarvin()
+@@ -78,6 +78,14 @@ export default function Admin() {
+           <p className="tiny" style={{ marginTop: 8 }}>
+             Probá revocar un nodo y enviar un reporte desde él: la malla lo descarta en el primer salto.
+           </p>
++          {MODO_REAL && (
++            <div className="banner" style={{ marginTop: 12 }}>
++              <b>En el contrato de Testnet</b> están registrados N1 a N5. Los nodos que des de alta acá existen solo
++              en la malla local: si envían un reporte, la malla lo deja pasar pero el contrato lo rechaza con
++              «Nodo no autorizado». Así se ve que la autorización vive en la red y no en la puerta de enlace. Las altas
++              y revocaciones en el contrato las firma la cuenta administradora con <code>npm run admin</code>.
++            </div>
++          )}
+         </div>
+       </div>
+     </>
+diff --git a/frontend/src/pages/Gateway.tsx b/frontend/src/pages/Gateway.tsx
+index 6fe74fd..9722320 100644
+--- a/frontend/src/pages/Gateway.tsx
++++ b/frontend/src/pages/Gateway.tsx
+@@ -1,6 +1,7 @@
+ import { Page, Tipo } from '../components/ui'
+ import { corto, hora, type Enlace } from '../lib/model'
+-import { useMarvin } from '../lib/store'
++import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
++import { enlaceContrato, enlaceCuenta, enlaceTx } from '../lib/stellar'
+ 
+ const ENLACES: { v: Enlace; t: string }[] = [
+   { v: 'sin', t: 'Sin internet' },
+@@ -9,14 +10,16 @@ const ENLACES: { v: Enlace; t: string }[] = [
+ ]
+ 
+ export default function Gateway() {
+-  const { estado, setEnlace } = useMarvin()
++  const { estado, setEnlace, puerta } = useMarvin()
+   const cola = estado.reportes
+     .filter((r) => r.estado === 'en_gateway')
+     .sort((a, b) => a.prioridad - b.prioridad || a.ts - b.ts)
+   const publicados = estado.reportes
+     .filter((r) => r.estado === 'publicado')
+     .sort((a, b) => (b.publicadoEn ?? 0) - (a.publicadoEn ?? 0))
+-  const siguiente = cola[0]
++  const enCurso = estado.reportes.find((r) => r.estado === 'publicando')
++  const siguiente = enCurso ?? cola[0]
++  const rechazadosRed = estado.reportes.filter((r) => r.estado === 'rechazado' && r.motivoRechazo && r.nodoId && r.alcance.includes('GW'))
+ 
+   return (
+     <>
+@@ -55,7 +58,7 @@ export default function Gateway() {
+             {estado.enlace === 'sin' ? 'Caído' : estado.enlace === 'celular' ? 'Celular' : 'Satelital'}
+           </div>
+           <div className="l">
+-            {estado.enlace === 'sin' ? 'La cola se conserva hasta que vuelva un enlace' : '~1 transacción cada 2–3 s en la demo'}
++            {estado.enlace === 'sin' ? 'La cola se conserva hasta que vuelva un enlace' : MODO_REAL ? 'Una transacción por reporte, ~5–10 s cada una en Testnet' : '~1 transacción cada 2–3 s en la demo'}
+           </div>
+         </div>
+       </div>
+@@ -98,7 +101,7 @@ export default function Gateway() {
+         </div>
+ 
+         <div className="card">
+-          <h2>Próxima invocación al contrato</h2>
++          <h2>{enCurso ? 'Invocando el contrato…' : 'Próxima invocación al contrato'}</h2>
+           {siguiente ? (
+             <pre className="mono" style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8, overflowX: 'auto', margin: 0, fontSize: '0.75rem', lineHeight: 1.6 }}>
+ {`contrato.registrar_reporte(
+@@ -116,6 +119,28 @@ export default function Gateway() {
+             Los datos personales y la nota del reporte no salen de la red local; en Stellar solo queda el compromiso
+             (hash) para poder verificarlo después. Las comisiones las paga la cuenta de la puerta de enlace, no los nodos.
+           </p>
++          {MODO_REAL && (
++            <div className="stack small" style={{ marginTop: 12, gap: 6 }}>
++              <div>
++                Contrato:{' '}
++                <a className="mono" href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer">
++                  {corto(CONTRATO.contractId, 8)}
++                </a>
++              </div>
++              {puerta && (
++                <div>
++                  Cuenta de la puerta de enlace:{' '}
++                  <a className="mono" href={enlaceCuenta(puerta.publicKey)} target="_blank" rel="noreferrer">
++                    {corto(puerta.publicKey, 8)}
++                  </a>{' '}
++                  <span className={`badge ${puerta.estado === 'lista' ? 'ok' : puerta.estado === 'error' ? 'err' : ''}`}>
++                    {puerta.estado === 'lista' ? 'Con fondos' : puerta.estado === 'fondeando' ? 'Pidiendo fondos a Friendbot…' : puerta.estado === 'error' ? 'Sin conexión' : 'Se fondea al activar el enlace'}
++                  </span>
++                  {puerta.error && <div className="tiny" style={{ color: 'var(--err)' }}>{puerta.error}</div>}
++                </div>
++              )}
++            </div>
++          )}
+         </div>
+       </div>
+ 
+@@ -139,15 +164,43 @@ export default function Gateway() {
+                     <div className="tiny mono">{r.id}</div>
+                   </td>
+                   <td className="mono">{r.ledger?.toLocaleString('es-MX')}</td>
+-                  <td className="mono">{corto(r.txHash ?? '', 10)}</td>
++                  <td className="mono">
++                    {MODO_REAL && r.txHash ? (
++                      <a href={enlaceTx(r.txHash)} target="_blank" rel="noreferrer">{corto(r.txHash, 10)} ↗</a>
++                    ) : (
++                      corto(r.txHash ?? '', 10)
++                    )}
++                  </td>
+                   <td className="mono">{r.publicadoEn ? hora(r.publicadoEn) : '—'}</td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+-        <p className="tiny" style={{ marginTop: 8 }}>Transacciones simuladas: el contrato Soroban se despliega en Testnet en la semana 4.</p>
++        <p className="tiny" style={{ marginTop: 8 }}>
++          {MODO_REAL
++            ? 'Transacciones reales en Stellar Testnet: cada enlace abre la transacción en el explorador público.'
++            : 'Transacciones simuladas: falta configurar el contrato en src/contrato.json.'}
++        </p>
+       </div>
++
++      {rechazadosRed.length > 0 && (
++        <div className="card" style={{ marginTop: 16 }}>
++          <h2>Rechazados</h2>
++          <div className="table-wrap">
++            <table>
++              <tbody>
++                {rechazadosRed.map((r) => (
++                  <tr key={r.id}>
++                    <td><Tipo tipo={r.tipo} corto /><div className="tiny mono">{r.id} · {r.nodoId}</div></td>
++                    <td style={{ color: 'var(--err)' }}>{r.motivoRechazo}</td>
++                  </tr>
++                ))}
++              </tbody>
++            </table>
++          </div>
++        </div>
++      )}
+     </>
+   )
+ }
+diff --git a/frontend/src/pages/Inicio.tsx b/frontend/src/pages/Inicio.tsx
+index 6787a90..82d196e 100644
+--- a/frontend/src/pages/Inicio.tsx
++++ b/frontend/src/pages/Inicio.tsx
+@@ -1,6 +1,7 @@
+ import { Link } from 'react-router-dom'
+ import { Page } from '../components/ui'
+-import { useMarvin } from '../lib/store'
++import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
++import { enlaceContrato } from '../lib/stellar'
+ 
+ const PASOS = [
+   { to: '/nodo', n: 'Paso 1 · Rescatista', t: 'Nodo de campo', d: 'Elige una plantilla, el nodo firma el reporte con su llave ed25519 y lo guarda en su memoria.', h: 'H2 · H3 · H4 · H9 · H11' },
+@@ -56,11 +57,21 @@ export default function Inicio() {
+         ))}
+       </div>
+ 
+-      <div className="banner">
+-        <b>Qué es real y qué es simulado.</b> El hash SHA-256 y la firma ed25519 de cada reporte se calculan de
+-        verdad en el navegador, con el mismo algoritmo que usarán los ESP32. La malla ESP-NOW y la publicación en
+-        Stellar Testnet se simulan: el contrato Soroban se escribe y despliega en la semana 4.
+-      </div>
++      {MODO_REAL ? (
++        <div className="banner">
++          <b>Qué es real y qué es simulado.</b> El hash SHA-256 y la firma ed25519 de cada reporte se calculan de
++          verdad en el navegador. La publicación y la verificación usan el{' '}
++          <a href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer">contrato de Marvin desplegado en Stellar Testnet</a>:
++          el contrato comprueba en la red que el nodo esté autorizado y que la firma sea válida. Lo único simulado
++          es la radio entre nodos (la malla).
++        </div>
++      ) : (
++        <div className="banner">
++          <b>Qué es real y qué es simulado.</b> El hash SHA-256 y la firma ed25519 de cada reporte se calculan de
++          verdad en el navegador. La malla y la publicación en Stellar se simulan porque todavía no hay un contrato
++          configurado en <code>src/contrato.json</code>.
++        </div>
++      )}
+     </>
+   )
+ }
+diff --git a/frontend/src/pages/Mando.tsx b/frontend/src/pages/Mando.tsx
+index 1857264..2023c5b 100644
+--- a/frontend/src/pages/Mando.tsx
++++ b/frontend/src/pages/Mando.tsx
+@@ -9,7 +9,7 @@ export default function Mando() {
+   const [zonaSel, setZonaSel] = useState<string | null>(null)
+   const [verAnulados, setVerAnulados] = useState(false)
+ 
+-  const recibidos = estado.reportes.filter((r) => r.estado === 'en_gateway' || r.estado === 'publicado')
++  const recibidos = estado.reportes.filter((r) => r.estado === 'en_gateway' || r.estado === 'publicando' || r.estado === 'publicado')
+   const activos = vigentes(estado.reportes)
+   const idsActivos = new Set(activos.map((r) => r.id))
+   const lista = (verAnulados ? recibidos : activos)
+diff --git a/frontend/src/pages/Registro.tsx b/frontend/src/pages/Registro.tsx
+index 925d08f..d16264f 100644
+--- a/frontend/src/pages/Registro.tsx
++++ b/frontend/src/pages/Registro.tsx
+@@ -2,9 +2,10 @@ import { useState } from 'react'
+ import { Page, Tipo } from '../components/ui'
+ import { canonico, corto, hora, payloadDe, type PayloadReporte, type Reporte } from '../lib/model'
+ import { hashReporte, verificar } from '../lib/crypto'
+-import { useMarvin } from '../lib/store'
++import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
++import { consultar, enlaceContrato, enlaceTx } from '../lib/stellar'
+ 
+-type Resultado = { ok: boolean; titulo: string; lineas: string[] }
++type Resultado = { ok: boolean; titulo: string; lineas: string[]; tx?: string }
+ 
+ export default function Registro() {
+   const { estado } = useMarvin()
+@@ -21,6 +22,46 @@ export default function Registro() {
+     setRes(null)
+   }
+ 
++  const [consultando, setConsultando] = useState(false)
++
++  // Modo real: se le pregunta al contrato en Stellar Testnet, no a la memoria local.
++  async function comprobarEnRed(p: PayloadReporte, hash: string) {
++    setConsultando(true)
++    try {
++      const reg = await consultar(CONTRATO.contractId, hash)
++      const local = publicados.find((r) => r.hash === hash)
++      if (!reg) {
++        const mismoId = publicados.find((r) => r.id === p.id)
++        setRes({
++          ok: false,
++          titulo: 'El reporte NO está en el contrato',
++          lineas: [
++            `Hash calculado: ${corto(hash, 12)}`,
++            mismoId
++              ? `En Stellar, ${p.id} está registrado con el hash ${corto(mismoId.hash, 12)}: el contenido fue alterado.`
++              : 'El contrato no tiene ningún reporte con este hash.',
++          ],
++        })
++        return
++      }
++      const nodo = estado.nodos.find((n) => n.publicKey === reg.nodo)
++      setRes({
++        ok: reg.nodo === p.nodo,
++        titulo: reg.nodo === p.nodo ? 'Reporte íntegro: el contrato lo tiene registrado' : 'El hash existe, pero firmado por otro nodo',
++        lineas: [
++          `Consultado en vivo al contrato ${corto(CONTRATO.contractId, 6)} en Stellar Testnet`,
++          `Registrado en el ledger ${reg.ledger.toLocaleString('es-MX')} (${new Date(reg.timestamp * 1000).toLocaleString('es-MX')})`,
++          `Firma verificada por el contrato al registrarlo · nodo ${corto(reg.nodo, 8)} (${nodo?.id ?? '¿?'} · ${nodo?.brigada ?? 'desconocido'})`,
++        ],
++        tx: local?.txHash,
++      })
++    } catch (e) {
++      setRes({ ok: false, titulo: 'No se pudo consultar Stellar Testnet', lineas: [e instanceof Error ? e.message : String(e)] })
++    } finally {
++      setConsultando(false)
++    }
++  }
++
+   function comprobar() {
+     let p: PayloadReporte
+     try {
+@@ -30,6 +71,10 @@ export default function Registro() {
+       return
+     }
+     const hash = hashReporte(p)
++    if (MODO_REAL) {
++      void comprobarEnRed(p, hash)
++      return
++    }
+     const enCadena = publicados.find((r) => r.hash === hash)
+     if (!enCadena) {
+       const mismoId = publicados.find((r) => r.id === p.id)
+@@ -68,7 +113,14 @@ export default function Registro() {
+       <div className="grid g32">
+         <div className="card">
+           <div className="card-head">
+-            <h2>Eventos del contrato</h2>
++            <h2>
++              Eventos del contrato
++              {MODO_REAL && (
++                <a className="tiny" style={{ marginLeft: 8, fontWeight: 400 }} href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer">
++                  ver contrato ↗
++                </a>
++              )}
++            </h2>
+             <span className="tiny">{publicados.length} reportes registrados</span>
+           </div>
+           <div className="table-wrap">
+@@ -87,7 +139,13 @@ export default function Registro() {
+                   <tr key={r.id}>
+                     <td className="mono">{r.ledger?.toLocaleString('es-MX')}</td>
+                     <td><Tipo tipo={r.tipo} corto /></td>
+-                    <td className="mono">{corto(r.hash, 6)}</td>
++                    <td className="mono">
++                      {MODO_REAL && r.txHash ? (
++                        <a href={enlaceTx(r.txHash)} target="_blank" rel="noreferrer">{corto(r.hash, 6)} ↗</a>
++                      ) : (
++                        corto(r.hash, 6)
++                      )}
++                    </td>
+                     <td className="mono">{corto(r.nodo, 4)}</td>
+                     <td>
+                       <button className="btn" onClick={() => cargar(r)}>Verificar</button>
+@@ -110,7 +168,7 @@ export default function Registro() {
+           </p>
+           <textarea className="input" value={texto} onChange={(e) => { setTexto(e.target.value); setRes(null) }} placeholder='{"id": "R-...", "tipo": "victima", ...}' rows={10} />
+           <div className="row">
+-            <button className="btn primary" onClick={comprobar} disabled={!texto.trim()}>Comprobar</button>
++            <button className="btn primary" onClick={comprobar} disabled={!texto.trim() || consultando}>{consultando ? 'Consultando…' : 'Comprobar'}</button>
+             {publicados[0] && (
+               <button className="btn" onClick={() => cargar(publicados[0], true)}>Probar con un reporte alterado</button>
+             )}
+@@ -121,6 +179,11 @@ export default function Registro() {
+               {res.lineas.map((l) => (
+                 <div key={l} className="small" style={{ marginTop: 4 }}>{l}</div>
+               ))}
++              {res.tx && (
++                <div className="small" style={{ marginTop: 4 }}>
++                  <a href={enlaceTx(res.tx)} target="_blank" rel="noreferrer">Ver la transacción en el explorador ↗</a>
++                </div>
++              )}
+             </div>
+           )}
+           <details className="tiny">
+diff --git a/frontend/tsconfig.app.json b/frontend/tsconfig.app.json
+index c9ccbd4..33875ba 100644
+--- a/frontend/tsconfig.app.json
++++ b/frontend/tsconfig.app.json
+@@ -9,6 +9,7 @@
+ 
+     /* Bundler mode */
+     "moduleResolution": "bundler",
++    "resolveJsonModule": true,
+     "allowImportingTsExtensions": true,
+     "verbatimModuleSyntax": true,
+     "moduleDetection": "force",
+diff --git a/frontend/vite.config.ts b/frontend/vite.config.ts
+index 8b0f57b..427cac5 100644
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
+@@ -3,5 +3,6 @@ import react from '@vitejs/plugin-react'
+ 
+ // https://vite.dev/config/
+ export default defineConfig({
++  base: './',
+   plugins: [react()],
+ })
+-- 
+2.43.0
+
