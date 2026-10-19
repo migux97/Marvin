@@ -1,0 +1,5 @@
+# Llave secreta de la cuenta administradora del contrato (no se versiona)
+.marvin-admin.json
+# Compilación del contrato
+contracts/target/
+contracts/marvin/test_snapshots/

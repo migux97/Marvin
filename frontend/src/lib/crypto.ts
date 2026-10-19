@@ -12,6 +12,14 @@ export function generarLlaves(): { publicKey: string; privateKey: string } {
   return { privateKey: bytesToHex(priv), publicKey: bytesToHex(ed.getPublicKey(priv)) }
 }
 
+// Llaves fijas de los nodos de demostración N1–N5. Se derivan de una semilla
+// pública para que el script de despliegue pueda registrarlas en el contrato.
+// Solo sirven para la demo en Testnet: un nodo real genera su llave en el ESP32.
+export function llavesDemo(id: string): { publicKey: string; privateKey: string } {
+  const priv = sha256(utf8ToBytes(`marvin-demo:${id}`))
+  return { privateKey: bytesToHex(priv), publicKey: bytesToHex(ed.getPublicKey(priv)) }
+}
+
 export function hashReporte(p: PayloadReporte): string {
   return bytesToHex(sha256(utf8ToBytes(canonico(p))))
 }

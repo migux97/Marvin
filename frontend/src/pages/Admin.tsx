@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Page } from '../components/ui'
 import { corto } from '../lib/model'
-import { useMarvin } from '../lib/store'
+import { MODO_REAL, useMarvin } from '../lib/store'
 
 export default function Admin() {
   const { estado, altaNodo, revocar, reactivar } = useMarvin()
@@ -78,6 +78,14 @@ export default function Admin() {
           <p className="tiny" style={{ marginTop: 8 }}>
             Probá revocar un nodo y enviar un reporte desde él: la malla lo descarta en el primer salto.
           </p>
+          {MODO_REAL && (
+            <div className="banner" style={{ marginTop: 12 }}>
+              <b>En el contrato de Testnet</b> están registrados N1 a N5. Los nodos que des de alta acá existen solo
+              en la malla local: si envían un reporte, la malla lo deja pasar pero el contrato lo rechaza con
+              «Nodo no autorizado». Así se ve que la autorización vive en la red y no en la puerta de enlace. Las altas
+              y revocaciones en el contrato las firma la cuenta administradora con <code>npm run admin</code>.
+            </div>
+          )}
         </div>
       </div>
     </>

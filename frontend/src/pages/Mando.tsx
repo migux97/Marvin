@@ -9,7 +9,7 @@ export default function Mando() {
   const [zonaSel, setZonaSel] = useState<string | null>(null)
   const [verAnulados, setVerAnulados] = useState(false)
 
-  const recibidos = estado.reportes.filter((r) => r.estado === 'en_gateway' || r.estado === 'publicado')
+  const recibidos = estado.reportes.filter((r) => r.estado === 'en_gateway' || r.estado === 'publicando' || r.estado === 'publicado')
   const activos = vigentes(estado.reportes)
   const idsActivos = new Set(activos.map((r) => r.id))
   const lista = (verAnulados ? recibidos : activos)

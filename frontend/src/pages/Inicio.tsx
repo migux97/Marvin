@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Page } from '../components/ui'
-import { useMarvin } from '../lib/store'
+import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
+import { enlaceContrato } from '../lib/stellar'
 
 const PASOS = [
   { to: '/nodo', n: 'Paso 1 · Rescatista', t: 'Nodo de campo', d: 'Elige una plantilla, el nodo firma el reporte con su llave ed25519 y lo guarda en su memoria.', h: 'H2 · H3 · H4 · H9 · H11' },
@@ -56,11 +57,21 @@ export default function Inicio() {
         ))}
       </div>
 
-      <div className="banner">
-        <b>Qué es real y qué es simulado.</b> El hash SHA-256 y la firma ed25519 de cada reporte se calculan de
-        verdad en el navegador, con el mismo algoritmo que usarán los ESP32. La malla ESP-NOW y la publicación en
-        Stellar Testnet se simulan: el contrato Soroban se escribe y despliega en la semana 4.
-      </div>
+      {MODO_REAL ? (
+        <div className="banner">
+          <b>Qué es real y qué es simulado.</b> El hash SHA-256 y la firma ed25519 de cada reporte se calculan de
+          verdad en el navegador. La publicación y la verificación usan el{' '}
+          <a href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer">contrato de Marvin desplegado en Stellar Testnet</a>:
+          el contrato comprueba en la red que el nodo esté autorizado y que la firma sea válida. Lo único simulado
+          es la radio entre nodos (la malla).
+        </div>
+      ) : (
+        <div className="banner">
+          <b>Qué es real y qué es simulado.</b> El hash SHA-256 y la firma ed25519 de cada reporte se calculan de
+          verdad en el navegador. La malla y la publicación en Stellar se simulan porque todavía no hay un contrato
+          configurado en <code>src/contrato.json</code>.
+        </div>
+      )}
     </>
   )
 }

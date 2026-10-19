@@ -1,0 +1,19 @@
+[package]
+name = "marvin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Registro de nodos y de reportes de emergencia de Marvin (Soroban)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "=23.5.3"
+
+[dev-dependencies]
+soroban-sdk = { version = "=23.5.3", features = ["testutils"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"

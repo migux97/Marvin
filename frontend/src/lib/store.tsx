@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { Keypair } from '@stellar/stellar-sdk'
 import {
   GATEWAY_ID,
   NODOS_BASE,
@@ -11,7 +12,14 @@ import {
   type Reporte,
   type TipoReporte,
 } from './model'
-import { firmar, generarLlaves, hashReporte, hexAleatorio, verificar } from './crypto'
+import { firmar, generarLlaves, hashReporte, hexAleatorio, llavesDemo, verificar } from './crypto'
+import { ErrorContrato, fondear, registrarReporte } from './stellar'
+import contrato from '../contrato.json'
+
+// Con un contrato desplegado, la puerta de enlace publica de verdad en Stellar Testnet.
+// Sin él (contrato.json vacío), la publicación se simula como en la semana 3.
+export const CONTRATO: { contractId: string; admin: string; desplegadoEn: string } = contrato
+export const MODO_REAL = Boolean(CONTRATO.contractId)
 
 interface Evento {
   ts: number
@@ -37,8 +45,13 @@ type Accion =
   | { type: 'revocar'; id: string }
   | { type: 'reactivar'; id: string }
   | { type: 'reiniciar'; estado: Estado }
+  | { type: 'publicando'; id: string }
+  | { type: 'publicadoReal'; id: string; txHash: string; ledger: number }
+  | { type: 'rechazadoRed'; id: string; motivo: string }
+  | { type: 'reintentar'; id: string; motivo: string }
 
-const CLAVE = 'marvin-demo-v1'
+const CLAVE = MODO_REAL ? `marvin-demo-v2-${CONTRATO.contractId}` : 'marvin-demo-v2'
+const CLAVE_PUERTA = 'marvin-puerta-testnet'
 
 function log(e: Estado, texto: string, tipo: Evento['tipo'] = 'info'): Evento[] {
   return [{ ts: Date.now(), texto, tipo }, ...e.bitacora].slice(0, 60)
@@ -73,7 +86,7 @@ function construirReporte(
 }
 
 function estadoInicial(): Estado {
-  const nodos: Nodo[] = NODOS_BASE.map((n) => ({ ...n, ...generarLlaves(), estado: 'activo' }))
+  const nodos: Nodo[] = NODOS_BASE.map((n) => ({ ...n, ...llavesDemo(n.id), estado: 'activo' }))
   const ahora = Date.now()
   const por = (id: string) => nodos.find((n) => n.id === id)!
   const semilla: [string, TipoReporte, string, string, number, string, number][] = [
@@ -95,7 +108,8 @@ function estadoInicial(): Estado {
       anulaA: null,
       ts: ahora - minutos * 60_000,
     })
-    const publicado = i < 4
+    // En modo real nada se da por publicado: la puerta de enlace lo publica de verdad.
+    const publicado = !MODO_REAL && i < 4
     ledger += 37
     return {
       ...r,
@@ -112,9 +126,17 @@ function estadoInicial(): Estado {
     nodos,
     reportes,
     enlace: 'sin',
-    ledger: ledger + 120,
+    ledger: MODO_REAL ? 0 : ledger + 120,
     ticks: 0,
-    bitacora: [{ ts: ahora, texto: 'Demo iniciada: 6 reportes de ejemplo, enlace a internet caído.', tipo: 'info' }],
+    bitacora: [
+      {
+        ts: ahora,
+        texto: MODO_REAL
+          ? 'Demo iniciada: 6 reportes de ejemplo en la puerta de enlace. Activá un enlace para publicarlos en Stellar Testnet.'
+          : 'Demo iniciada: 6 reportes de ejemplo, enlace a internet caído.',
+        tipo: 'info',
+      },
+    ],
   }
 }
 
@@ -150,7 +172,7 @@ function avanzarMalla(e: Estado): Estado {
 }
 
 function publicar(e: Estado, txHash: string): Estado {
-  if (e.enlace === 'sin') return e
+  if (MODO_REAL || e.enlace === 'sin') return e
   const cada = e.enlace === 'satelital' ? 3 : 2 // el satelital es más lento
   if (e.ticks % cada !== 0) return e
   const cola = e.reportes
@@ -197,21 +219,71 @@ function reducer(e: Estado, a: Accion): Estado {
       return { ...e, nodos: e.nodos.map((n) => (n.id === a.id ? { ...n, estado: 'activo' } : n)), bitacora: log(e, `Llave de ${a.id} reactivada.`, 'ok') }
     case 'reiniciar':
       return a.estado
+    case 'publicando':
+      return { ...e, reportes: e.reportes.map((r) => (r.id === a.id ? { ...r, estado: 'publicando' } : r)) }
+    case 'publicadoReal':
+      return {
+        ...e,
+        ledger: Math.max(e.ledger, a.ledger),
+        reportes: e.reportes.map((r) =>
+          r.id === a.id ? { ...r, estado: 'publicado', txHash: a.txHash, ledger: a.ledger, publicadoEn: Date.now() } : r,
+        ),
+        bitacora: log(e, `${a.id} registrado en Stellar Testnet (ledger ${a.ledger.toLocaleString('es-MX')}).`, 'ok'),
+      }
+    case 'rechazadoRed':
+      return {
+        ...e,
+        reportes: e.reportes.map((r) => (r.id === a.id ? { ...r, estado: 'rechazado', motivoRechazo: a.motivo } : r)),
+        bitacora: log(e, `${a.id} rechazado por el contrato: ${a.motivo}.`, 'error'),
+      }
+    case 'reintentar':
+      return {
+        ...e,
+        reportes: e.reportes.map((r) => (r.id === a.id ? { ...r, estado: 'en_gateway' } : r)),
+        bitacora: log(e, `No se pudo publicar ${a.id} (${a.motivo}). Se reintenta en unos segundos.`, 'error'),
+      }
   }
 }
 
 function cargar(): Estado {
   try {
     const raw = localStorage.getItem(CLAVE)
-    if (raw) return JSON.parse(raw) as Estado
+    if (raw) {
+      const e = JSON.parse(raw) as Estado
+      // Una publicación interrumpida al recargar vuelve a la cola.
+      return { ...e, reportes: e.reportes.map((r) => (r.estado === 'publicando' ? { ...r, estado: 'en_gateway' } : r)) }
+    }
   } catch {
     /* sin almacenamiento: se arranca de cero */
   }
   return estadoInicial()
 }
 
+export interface Puerta {
+  publicKey: string
+  estado: 'sin_fondos' | 'fondeando' | 'lista' | 'error'
+  error?: string
+}
+
+function cuentaPuerta(): Keypair {
+  try {
+    const guardada = localStorage.getItem(CLAVE_PUERTA)
+    if (guardada) return Keypair.fromSecret(guardada)
+  } catch {
+    /* se genera una nueva */
+  }
+  const kp = Keypair.random()
+  try {
+    localStorage.setItem(CLAVE_PUERTA, kp.secret())
+  } catch {
+    /* ignorar */
+  }
+  return kp
+}
+
 interface Ctx {
   estado: Estado
+  puerta: Puerta | null
   enviarReporte: (nodoId: string, datos: Omit<PayloadReporte, 'id' | 'nodo' | 'ts'>) => Reporte | null
   setEnlace: (e: Enlace) => void
   asignar: (id: string, brigada: string) => void
@@ -230,6 +302,59 @@ export function MarvinProvider({ children }: { children: ReactNode }) {
     const t = setInterval(() => dispatch({ type: 'tick', txHash: hexAleatorio(32) }), 900)
     return () => clearInterval(t)
   }, [])
+
+  // ---- Publicación real en Stellar Testnet ----
+  const keypair = useRef<Keypair | null>(null)
+  const ocupado = useRef(false)
+  const esperarHasta = useRef(0)
+  const [puerta, setPuerta] = useState<Puerta | null>(null)
+
+  useEffect(() => {
+    if (!MODO_REAL) return
+    keypair.current = cuentaPuerta()
+    setPuerta({ publicKey: keypair.current.publicKey(), estado: 'sin_fondos' })
+  }, [])
+
+  useEffect(() => {
+    if (!MODO_REAL || !keypair.current || estado.enlace === 'sin' || ocupado.current) return
+    if (Date.now() < esperarHasta.current) return
+    const siguiente = estado.reportes
+      .filter((r) => r.estado === 'en_gateway')
+      .sort((a, b) => a.prioridad - b.prioridad || a.ts - b.ts)[0]
+    if (!siguiente) return
+    const kp = keypair.current
+    ocupado.current = true
+    const original = siguiente.anulaA ? estado.reportes.find((r) => r.id === siguiente.anulaA) : undefined
+    ;(async () => {
+      try {
+        if (puerta?.estado !== 'lista') {
+          setPuerta({ publicKey: kp.publicKey(), estado: 'fondeando' })
+          await fondear(kp.publicKey())
+          setPuerta({ publicKey: kp.publicKey(), estado: 'lista' })
+        }
+        dispatch({ type: 'publicando', id: siguiente.id })
+        const r = await registrarReporte(CONTRATO.contractId, kp, {
+          hash: siguiente.hash,
+          llave: siguiente.nodo,
+          firma: siguiente.firma,
+          tipo: siguiente.prioridad,
+          anula: original?.estado === 'publicado' ? original.hash : null,
+        })
+        dispatch({ type: 'publicadoReal', id: siguiente.id, txHash: r.txHash, ledger: r.ledger })
+      } catch (err) {
+        if (err instanceof ErrorContrato && err.codigo) {
+          dispatch({ type: 'rechazadoRed', id: siguiente.id, motivo: err.message })
+        } else {
+          const motivo = err instanceof Error ? err.message.slice(0, 120) : 'error de red'
+          esperarHasta.current = Date.now() + 8000
+          dispatch({ type: 'reintentar', id: siguiente.id, motivo })
+          setPuerta((p) => (p && p.estado !== 'lista' ? { ...p, estado: 'error', error: motivo } : p))
+        }
+      } finally {
+        ocupado.current = false
+      }
+    })()
+  }, [estado.ticks, estado.enlace, estado.reportes, puerta?.estado])
 
   useEffect(() => {
     try {
@@ -271,6 +396,7 @@ export function MarvinProvider({ children }: { children: ReactNode }) {
   const valor = useMemo<Ctx>(
     () => ({
       estado,
+      puerta,
       enviarReporte,
       setEnlace: (enlace) => dispatch({ type: 'enlace', enlace }),
       asignar: (id, brigada) => dispatch({ type: 'asignar', id, brigada }),
@@ -279,7 +405,7 @@ export function MarvinProvider({ children }: { children: ReactNode }) {
       reactivar: (id) => dispatch({ type: 'reactivar', id }),
       reiniciar: () => dispatch({ type: 'reiniciar', estado: estadoInicial() }),
     }),
-    [estado, enviarReporte, altaNodo],
+    [estado, puerta, enviarReporte, altaNodo],
   )
 
   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>
@@ -295,7 +421,7 @@ export function useMarvin(): Ctx {
 // Reportes que ya llegaron al centro de mando y siguen vigentes: los anulados por una corrección quedan fuera del panorama.
 // eslint-disable-next-line react-refresh/only-export-components
 export function vigentes(reportes: Reporte[]): Reporte[] {
-  const recibido = (r: Reporte) => r.estado === 'en_gateway' || r.estado === 'publicado'
+  const recibido = (r: Reporte) => r.estado === 'en_gateway' || r.estado === 'publicando' || r.estado === 'publicado'
   const anulados = new Set(reportes.filter((r) => r.anulaA && recibido(r)).map((r) => r.anulaA))
   return reportes.filter((r) => recibido(r) && !anulados.has(r.id))
 }

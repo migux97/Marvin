@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Page, Tipo } from '../components/ui'
 import { canonico, corto, hora, payloadDe, type PayloadReporte, type Reporte } from '../lib/model'
 import { hashReporte, verificar } from '../lib/crypto'
-import { useMarvin } from '../lib/store'
+import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
+import { consultar, enlaceContrato, enlaceTx } from '../lib/stellar'
 
-type Resultado = { ok: boolean; titulo: string; lineas: string[] }
+type Resultado = { ok: boolean; titulo: string; lineas: string[]; tx?: string }
 
 export default function Registro() {
   const { estado } = useMarvin()
@@ -21,6 +22,46 @@ export default function Registro() {
     setRes(null)
   }
 
+  const [consultando, setConsultando] = useState(false)
+
+  // Modo real: se le pregunta al contrato en Stellar Testnet, no a la memoria local.
+  async function comprobarEnRed(p: PayloadReporte, hash: string) {
+    setConsultando(true)
+    try {
+      const reg = await consultar(CONTRATO.contractId, hash)
+      const local = publicados.find((r) => r.hash === hash)
+      if (!reg) {
+        const mismoId = publicados.find((r) => r.id === p.id)
+        setRes({
+          ok: false,
+          titulo: 'El reporte NO está en el contrato',
+          lineas: [
+            `Hash calculado: ${corto(hash, 12)}`,
+            mismoId
+              ? `En Stellar, ${p.id} está registrado con el hash ${corto(mismoId.hash, 12)}: el contenido fue alterado.`
+              : 'El contrato no tiene ningún reporte con este hash.',
+          ],
+        })
+        return
+      }
+      const nodo = estado.nodos.find((n) => n.publicKey === reg.nodo)
+      setRes({
+        ok: reg.nodo === p.nodo,
+        titulo: reg.nodo === p.nodo ? 'Reporte íntegro: el contrato lo tiene registrado' : 'El hash existe, pero firmado por otro nodo',
+        lineas: [
+          `Consultado en vivo al contrato ${corto(CONTRATO.contractId, 6)} en Stellar Testnet`,
+          `Registrado en el ledger ${reg.ledger.toLocaleString('es-MX')} (${new Date(reg.timestamp * 1000).toLocaleString('es-MX')})`,
+          `Firma verificada por el contrato al registrarlo · nodo ${corto(reg.nodo, 8)} (${nodo?.id ?? '¿?'} · ${nodo?.brigada ?? 'desconocido'})`,
+        ],
+        tx: local?.txHash,
+      })
+    } catch (e) {
+      setRes({ ok: false, titulo: 'No se pudo consultar Stellar Testnet', lineas: [e instanceof Error ? e.message : String(e)] })
+    } finally {
+      setConsultando(false)
+    }
+  }
+
   function comprobar() {
     let p: PayloadReporte
     try {
@@ -30,6 +71,10 @@ export default function Registro() {
       return
     }
     const hash = hashReporte(p)
+    if (MODO_REAL) {
+      void comprobarEnRed(p, hash)
+      return
+    }
     const enCadena = publicados.find((r) => r.hash === hash)
     if (!enCadena) {
       const mismoId = publicados.find((r) => r.id === p.id)
@@ -68,7 +113,14 @@ export default function Registro() {
       <div className="grid g32">
         <div className="card">
           <div className="card-head">
-            <h2>Eventos del contrato</h2>
+            <h2>
+              Eventos del contrato
+              {MODO_REAL && (
+                <a className="tiny" style={{ marginLeft: 8, fontWeight: 400 }} href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer">
+                  ver contrato ↗
+                </a>
+              )}
+            </h2>
             <span className="tiny">{publicados.length} reportes registrados</span>
           </div>
           <div className="table-wrap">
@@ -87,7 +139,13 @@ export default function Registro() {
                   <tr key={r.id}>
                     <td className="mono">{r.ledger?.toLocaleString('es-MX')}</td>
                     <td><Tipo tipo={r.tipo} corto /></td>
-                    <td className="mono">{corto(r.hash, 6)}</td>
+                    <td className="mono">
+                      {MODO_REAL && r.txHash ? (
+                        <a href={enlaceTx(r.txHash)} target="_blank" rel="noreferrer">{corto(r.hash, 6)} ↗</a>
+                      ) : (
+                        corto(r.hash, 6)
+                      )}
+                    </td>
                     <td className="mono">{corto(r.nodo, 4)}</td>
                     <td>
                       <button className="btn" onClick={() => cargar(r)}>Verificar</button>
@@ -110,7 +168,7 @@ export default function Registro() {
           </p>
           <textarea className="input" value={texto} onChange={(e) => { setTexto(e.target.value); setRes(null) }} placeholder='{"id": "R-...", "tipo": "victima", ...}' rows={10} />
           <div className="row">
-            <button className="btn primary" onClick={comprobar} disabled={!texto.trim()}>Comprobar</button>
+            <button className="btn primary" onClick={comprobar} disabled={!texto.trim() || consultando}>{consultando ? 'Consultando…' : 'Comprobar'}</button>
             {publicados[0] && (
               <button className="btn" onClick={() => cargar(publicados[0], true)}>Probar con un reporte alterado</button>
             )}
@@ -121,6 +179,11 @@ export default function Registro() {
               {res.lineas.map((l) => (
                 <div key={l} className="small" style={{ marginTop: 4 }}>{l}</div>
               ))}
+              {res.tx && (
+                <div className="small" style={{ marginTop: 4 }}>
+                  <a href={enlaceTx(res.tx)} target="_blank" rel="noreferrer">Ver la transacción en el explorador ↗</a>
+                </div>
+              )}
             </div>
           )}
           <details className="tiny">

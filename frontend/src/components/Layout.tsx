@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { useMarvin } from '../lib/store'
+import { CONTRATO, MODO_REAL, useMarvin } from '../lib/store'
+import { corto } from '../lib/model'
+import { enlaceContrato } from '../lib/stellar'
 
 const RUTAS = [
   { to: '/', num: '·', texto: 'Inicio', end: true },
@@ -18,7 +20,7 @@ export default function Layout() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <img src="/marvin.svg" alt="" />
+          <img src={`${import.meta.env.BASE_URL}marvin.svg`} alt="" />
           <div>
             <b>Marvin</b>
             <small>Reportes de emergencia offline-first</small>
@@ -37,7 +39,17 @@ export default function Layout() {
             <span className="dot" style={{ background: 'currentColor' }} />
             {enlace}
           </span>
-          <span>Stellar Testnet · ledger {estado.ledger.toLocaleString('es-MX')}</span>
+          {MODO_REAL ? (
+            <span>
+              Stellar Testnet · contrato{' '}
+              <a href={enlaceContrato(CONTRATO.contractId)} target="_blank" rel="noreferrer" className="mono">
+                {corto(CONTRATO.contractId, 4)}
+              </a>
+              {estado.ledger > 0 && <> · ledger {estado.ledger.toLocaleString('es-MX')}</>}
+            </span>
+          ) : (
+            <span>Stellar Testnet (simulado) · ledger {estado.ledger.toLocaleString('es-MX')}</span>
+          )}
           <button className="btn" onClick={reiniciar}>
             Reiniciar demo
           </button>

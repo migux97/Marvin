@@ -7,6 +7,7 @@ export type TipoReporte = 'victima' | 'colapso' | 'ruta' | 'zona'
 export type EstadoReporte =
   | 'en_malla' // viajando de nodo en nodo
   | 'en_gateway' // llegó a la puerta de enlace, esperando enlace
+  | 'publicando' // transacción enviada a Stellar, esperando confirmación
   | 'publicado' // registrado en Stellar (simulado)
   | 'rechazado' // firma inválida o nodo revocado
 

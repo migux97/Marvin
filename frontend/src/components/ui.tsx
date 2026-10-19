@@ -15,6 +15,7 @@ export function Tipo({ tipo, corto = false }: { tipo: TipoReporte; corto?: boole
 const ESTADOS: Record<EstadoReporte, { texto: string; clase: string }> = {
   en_malla: { texto: 'En la malla', clase: 'acc' },
   en_gateway: { texto: 'En cola', clase: '' },
+  publicando: { texto: 'Publicando…', clase: 'acc' },
   publicado: { texto: 'En Stellar', clase: 'ok' },
   rechazado: { texto: 'Rechazado', clase: 'err' },
 }
